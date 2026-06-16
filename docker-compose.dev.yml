@@ -1,0 +1,7 @@
+services:
+  gramps-mcp:
+    build: .
+    image: gramps-mcp-rs:dev
+    env_file: .env
+    stdin_open: true
+    tty: false

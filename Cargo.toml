@@ -1,0 +1,36 @@
+[package]
+name = "gramps-mcp-rs"
+version = "0.1.0"
+edition = "2021"
+description = "MCP server for Gramps Web genealogy API"
+license = "Apache-2.0"
+
+[[bin]]
+name = "gramps-mcp-rs"
+path = "src/main.rs"
+
+[dependencies]
+base64 = "0.22"
+chrono = { version = "0.4", features = ["serde"] }
+envy = "0.4"
+reqwest = { version = "0.13", features = [
+    "json",
+    "multipart",
+    "brotli",
+    "gzip",
+    "zstd",
+    "rustls",
+    "rustls-native-certs",
+], default-features = false }
+rmcp = { version = "1.7", features = ["server", "transport-io"] }
+schemars = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+urlencoding = "2"
+
+[dev-dependencies]
+tokio-test = "0.4"
