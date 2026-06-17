@@ -35,7 +35,7 @@ impl GrampsMcpServer {
             .user_agent(concat!("gramps-mcp-rs/", env!("CARGO_PKG_VERSION")))
             .build()?;
         let mut tools = Self::tool_router();
-        if config.readonly {
+        if config.gramps_readonly {
             for name in WRITE_TOOLS {
                 tools.disable_route(*name);
             }
@@ -1142,13 +1142,37 @@ impl ServerHandler for GrampsMcpServer {
             .with_server_info(Implementation::new("gramps-mcp", env!("CARGO_PKG_VERSION")))
     }
 
+    // WORKAROUND: Claude Desktop does not recognise JSON Schema draft 2020-12
+    // (produced by schemars 1.x / rmcp 1.7) and silently hides all tools in
+    // the chat UI when it encounters it.  We patch every inputSchema on the fly:
+    //   1. Replace the $schema URI with the draft-07 declaration.
+    //   2. Replace boolean sub-schemas (draft-06+: `true` / `false`) with their
+    //      object equivalents (`{}` / `{"not":{}}`), which draft-07 requires.
+    //
+    // Track: https://github.com/modelcontextprotocol/rust-sdk/issues/326
+    // Remove this override (and fix_schema below) once Claude Desktop supports
+    // draft 2020-12, or once rmcp adds a built-in compatibility shim.
     async fn list_tools(
         &self,
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, McpError> {
+        let tools = self
+            .tools
+            .list_all()
+            .into_iter()
+            .map(|mut tool| {
+                let schema = std::sync::Arc::make_mut(&mut tool.input_schema);
+                schema.insert(
+                    "$schema".into(),
+                    "http://json-schema.org/draft-07/schema#".into(),
+                );
+                schema.values_mut().for_each(fix_schema);
+                tool
+            })
+            .collect();
         Ok(ListToolsResult {
-            tools: self.tools.list_all(),
+            tools,
             meta: None,
             next_cursor: None,
         })
@@ -1162,5 +1186,16 @@ impl ServerHandler for GrampsMcpServer {
         self.tools
             .call(ToolCallContext::new(self, request, context))
             .await
+    }
+}
+
+// See the WORKAROUND comment on list_tools above.
+fn fix_schema(v: &mut serde_json::Value) {
+    match v {
+        serde_json::Value::Bool(true) => *v = serde_json::json!({}),
+        serde_json::Value::Bool(false) => *v = serde_json::json!({"not": {}}),
+        serde_json::Value::Object(m) => m.values_mut().for_each(fix_schema),
+        serde_json::Value::Array(arr) => arr.iter_mut().for_each(fix_schema),
+        _ => {}
     }
 }

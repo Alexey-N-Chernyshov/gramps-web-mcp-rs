@@ -14,7 +14,7 @@ pub struct Config {
     pub gramps_username: String,
     pub gramps_password: String,
     #[serde(default)]
-    pub readonly: bool,
+    pub gramps_readonly: bool,
 }
 
 impl Config {
