@@ -153,10 +153,20 @@ pub async fn create_media_from_url(
 }
 
 fn extract_handle(resp: serde_json::Value) -> Result<Handle> {
-    resp["handle"]
+    let obj = if let Some(arr) = resp.as_array() {
+        // The newly created object has "old": null; updates have "old": {...}
+        arr.iter()
+            .find(|item| item["old"].is_null())
+            .or_else(|| arr.first())
+            .cloned()
+            .unwrap_or(serde_json::Value::Null)
+    } else {
+        resp
+    };
+    obj["handle"]
         .as_str()
         .map(str::to_string)
-        .ok_or_else(|| ClientError::Parse(format!("no handle in response: {resp}")))
+        .ok_or_else(|| ClientError::Parse(format!("no handle in response: {obj}")))
 }
 
 #[cfg(test)]
@@ -167,6 +177,21 @@ mod tests {
     fn extract_handle_present() {
         let json = serde_json::json!({ "handle": "ABC123", "gramps_id": "I0001" });
         assert_eq!(extract_handle(json).unwrap(), "ABC123");
+    }
+
+    #[test]
+    fn extract_handle_from_array() {
+        let json = serde_json::json!([{ "handle": "ABC123", "type": "add", "old": null }]);
+        assert_eq!(extract_handle(json).unwrap(), "ABC123");
+    }
+
+    #[test]
+    fn extract_handle_prefers_new_object_over_updates() {
+        let json = serde_json::json!([
+            { "handle": "PARENT", "type": "modify", "old": { "handle": "PARENT" } },
+            { "handle": "CHILD", "type": "add", "old": null }
+        ]);
+        assert_eq!(extract_handle(json).unwrap(), "CHILD");
     }
 
     #[test]

@@ -5,6 +5,10 @@ edition = "2021"
 description = "MCP server for Gramps Web genealogy API"
 license = "Apache-2.0"
 
+[lib]
+name = "gramps_mcp_rs"
+path = "src/lib.rs"
+
 [[bin]]
 name = "gramps-mcp-rs"
 path = "src/main.rs"
@@ -34,3 +38,5 @@ urlencoding = "2"
 
 [dev-dependencies]
 tokio-test = "0.4"
+testcontainers = { version = "0.27", features = ["http_wait"] }
+serial_test = "3"

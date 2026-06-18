@@ -1,0 +1,4 @@
+[env]
+# Limit parallel integration tests to avoid Docker resource exhaustion
+# (each test spins up its own container)
+RUST_TEST_THREADS = "4"
