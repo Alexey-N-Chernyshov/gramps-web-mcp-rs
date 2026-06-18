@@ -3,5 +3,4 @@ pub mod delete;
 pub mod get;
 pub mod merge;
 pub mod search;
-pub mod transaction;
 pub mod update;
