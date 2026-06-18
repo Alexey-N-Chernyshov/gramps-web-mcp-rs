@@ -11,13 +11,14 @@ MCP server for [Gramps Web](https://www.grampsweb.org/) genealogy API, written i
 
 ### Setup
 
-**1. Clone and build the image**
+**1. Pull the image**
 
 ```bash
-git clone https://github.com/Alexey-N-Chernyshov/gramps-mcp-rs.git
-cd gramps-mcp-rs
-docker compose -f docker-compose.dev.yml build
+curl -O https://raw.githubusercontent.com/Alexey-N-Chernyshov/gramps-mcp-rs/main/docker-compose.yml
+docker compose pull
 ```
+
+To update later, run `docker compose pull` again.
 
 **2. Configure your MCP client**
 
@@ -40,7 +41,7 @@ For Claude Desktop, add to `~/Library/Application Support/Claude/claude_desktop_
         "GRAMPS_PASSWORD",
         "-e",
         "GRAMPS_READONLY",
-        "gramps-mcp-rs:dev"
+        "ghcr.io/alexey-n-chernyshov/gramps-mcp-rs:latest"
       ],
       "env": {
         "GRAMPS_API_URL": "https://gramps.example.com",
@@ -84,5 +85,4 @@ cargo run --release
 
 ```bash
 docker compose -f docker-compose.dev.yml build
-docker compose -f docker-compose.dev.yml run --rm gramps-mcp
 ```
