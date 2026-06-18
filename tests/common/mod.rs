@@ -29,7 +29,7 @@ impl TestFixture {
             ))
             .with_env_var("GRAMPSWEB_TREE", "testdb")
             .with_env_var("GRAMPSWEB_SECRET_KEY", "integration-test-secret")
-            .with_startup_timeout(Duration::from_secs(120))
+            .with_startup_timeout(Duration::from_secs(240))
             .start()
             .await
             .expect("failed to start Gramps Web container");

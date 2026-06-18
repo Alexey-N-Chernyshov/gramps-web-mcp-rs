@@ -3,13 +3,13 @@ mod params;
 use crate::{
     client::GrampsClient,
     config::Config,
-    tools::{create, delete, get, merge, search, transaction, update},
+    tools::{create, delete, get, merge, search, update},
 };
 use params::{
     CreateCitationInput, CreateEventInput, CreateFamilyInput, CreateMediaInput, CreateNoteInput,
     CreatePersonInput, CreatePlaceInput, CreateRepositoryInput, CreateSourceInput, CreateTagInput,
     HandleInput, HandlePairInput, MergeFamilyInput, MergeInput, MergePersonInput, QueryInput,
-    UndoInput, UpdateInput,
+    UpdateInput,
 };
 use rmcp::{
     handler::server::{
@@ -87,7 +87,6 @@ const WRITE_TOOLS: &[&str] = &[
     "merge_place",
     "merge_repository",
     "merge_source",
-    "undo_transaction",
 ];
 
 #[tool_router]
@@ -393,17 +392,6 @@ impl GrampsMcpServer {
             .await
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
         let text = serde_json::to_string_pretty(&item).unwrap_or_default();
-        Ok(CallToolResult::success(vec![Content::text(text)]))
-    }
-
-    #[tool(
-        description = "List recent transactions (use transaction_id with undo_transaction to roll back)"
-    )]
-    async fn list_transactions(&self) -> Result<CallToolResult, McpError> {
-        let result = transaction::list_transactions(&self.client)
-            .await
-            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
-        let text = serde_json::to_string_pretty(&result).unwrap_or_default();
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
@@ -1117,19 +1105,6 @@ impl GrampsMcpServer {
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
         Ok(CallToolResult::success(vec![Content::text(format!(
             "Merged source {duplicate_handle} into {survivor_handle}"
-        ))]))
-    }
-
-    #[tool(description = "Undo a transaction by its ID (obtain ID from list_transactions)")]
-    async fn undo_transaction(
-        &self,
-        Parameters(UndoInput { transaction_id }): Parameters<UndoInput>,
-    ) -> Result<CallToolResult, McpError> {
-        transaction::undo_transaction(&self.client, transaction_id)
-            .await
-            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
-        Ok(CallToolResult::success(vec![Content::text(format!(
-            "Transaction {transaction_id} undone"
         ))]))
     }
 }

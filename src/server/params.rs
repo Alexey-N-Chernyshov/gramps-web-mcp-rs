@@ -109,11 +109,6 @@ pub struct CreateRepositoryInput {
 }
 
 #[derive(Deserialize, JsonSchema)]
-pub struct UndoInput {
-    pub transaction_id: i64,
-}
-
-#[derive(Deserialize, JsonSchema)]
 pub struct CreateMediaInput {
     /// Path to an existing file on the Gramps server (relative to media directory).
     pub path: Option<String>,
