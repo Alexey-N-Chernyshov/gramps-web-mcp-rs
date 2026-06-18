@@ -10,7 +10,7 @@ use gramps_mcp_rs::{
         place::{CreatePlaceRequest, PlaceName},
         source::CreateSourceRequest,
     },
-    tools::{create, delete, get, update},
+    tools::{create, delete, get, search, update},
 };
 
 #[tokio::test]
@@ -484,4 +484,229 @@ async fn media_from_url_round_trip() {
         get::get_media(client, &handle).await,
         Err(Error::NotFound(_))
     ));
+}
+
+#[tokio::test]
+async fn person_timeline() {
+    let fixture = common::TestFixture::new().await;
+    let client = &fixture.client;
+
+    let handle = create::create_person(client, CreatePersonRequest::default())
+        .await
+        .unwrap();
+
+    let timeline = get::get_person_timeline(client, &handle).await.unwrap();
+    assert!(timeline.is_array(), "timeline should be an array");
+
+    delete::delete_person(client, &handle).await.unwrap();
+}
+
+#[tokio::test]
+async fn family_timeline() {
+    let fixture = common::TestFixture::new().await;
+    let client = &fixture.client;
+
+    let family_handle = create::create_family(client, CreateFamilyRequest::default())
+        .await
+        .unwrap();
+
+    let timeline = get::get_family_timeline(client, &family_handle)
+        .await
+        .unwrap();
+    assert!(timeline.is_array(), "timeline should be an array");
+
+    delete::delete_family(client, &family_handle).await.unwrap();
+}
+
+#[tokio::test]
+async fn relations_between_parent_and_child() {
+    let fixture = common::TestFixture::new().await;
+    let client = &fixture.client;
+
+    let father = create::create_person(
+        client,
+        CreatePersonRequest {
+            gender: Some(1),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    let child = create::create_person(client, CreatePersonRequest::default())
+        .await
+        .unwrap();
+
+    let family_handle = create::create_family(
+        client,
+        CreateFamilyRequest {
+            father_handle: Some(father.clone()),
+            child_ref_list: Some(vec![serde_json::json!({"ref": child})]),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    let relations = get::get_relations(client, &father, &child).await.unwrap();
+    assert!(relations.is_array(), "relations should be an array");
+
+    delete::delete_family(client, &family_handle).await.unwrap();
+    delete::delete_person(client, &father).await.unwrap();
+    delete::delete_person(client, &child).await.unwrap();
+}
+
+#[tokio::test]
+async fn event_span_between_two_events() {
+    let fixture = common::TestFixture::new().await;
+    let client = &fixture.client;
+
+    let handle1 = create::create_event(
+        client,
+        CreateEventRequest {
+            event_type: Some(serde_json::json!("Birth")),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    let handle2 = create::create_event(
+        client,
+        CreateEventRequest {
+            event_type: Some(serde_json::json!("Death")),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    get::get_event_span(client, &handle1, &handle2)
+        .await
+        .unwrap();
+
+    delete::delete_event(client, &handle1).await.unwrap();
+    delete::delete_event(client, &handle2).await.unwrap();
+}
+
+#[tokio::test]
+async fn search_endpoints_return_ok() {
+    let fixture = common::TestFixture::new().await;
+    let client = &fixture.client;
+
+    // Create one object of each searchable type so the index is non-empty
+    let person = create::create_person(
+        client,
+        CreatePersonRequest {
+            primary_name: Some(PersonName {
+                first_name: Some("Searchable".to_string()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    let source = create::create_source(
+        client,
+        CreateSourceRequest {
+            title: Some("Search Source".to_string()),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    let citation = create::create_citation(client, &source, Some("p. 1"))
+        .await
+        .unwrap();
+
+    let event = create::create_event(
+        client,
+        CreateEventRequest {
+            event_type: Some(serde_json::json!("Birth")),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    let place = create::create_place(
+        client,
+        CreatePlaceRequest {
+            title: Some("Search Place".to_string()),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    let family = create::create_family(client, CreateFamilyRequest::default())
+        .await
+        .unwrap();
+
+    let note = create::create_note(client, "search note text", None)
+        .await
+        .unwrap();
+
+    let tag = create::create_tag(client, "SearchTag", None, None)
+        .await
+        .unwrap();
+
+    let repo = create::create_repository(client, "Search Repo", None)
+        .await
+        .unwrap();
+
+    let media = create::create_media_from_path(client, "/tmp/search.jpg", None, None)
+        .await
+        .unwrap();
+
+    // All find_* endpoints must return Ok with a JSON array
+    let r = search::find_person(client, "Searchable").await.unwrap();
+    assert!(r.is_array());
+
+    let r = search::find_source(client, "Search Source").await.unwrap();
+    assert!(r.is_array());
+
+    let r = search::find_citation(client, "p. 1").await.unwrap();
+    assert!(r.is_array());
+
+    let r = search::find_event(client, "Birth").await.unwrap();
+    assert!(r.is_array());
+
+    let r = search::find_place(client, "Search Place").await.unwrap();
+    assert!(r.is_array());
+
+    let r = search::find_family(client, "").await.unwrap();
+    assert!(r.is_array());
+
+    let r = search::find_note(client, "search note text").await.unwrap();
+    assert!(r.is_array());
+
+    let r = search::find_tag(client, "SearchTag").await.unwrap();
+    assert!(r.is_array());
+
+    let r = search::find_repository(client, "Search Repo")
+        .await
+        .unwrap();
+    assert!(r.is_array());
+
+    let r = search::find_media(client, "search").await.unwrap();
+    assert!(r.is_array());
+
+    let r = search::find_anything(client, "Search").await.unwrap();
+    assert!(r.is_array());
+
+    // Cleanup
+    delete::delete_person(client, &person).await.unwrap();
+    delete::delete_citation(client, &citation).await.unwrap();
+    delete::delete_source(client, &source).await.unwrap();
+    delete::delete_event(client, &event).await.unwrap();
+    delete::delete_place(client, &place).await.unwrap();
+    delete::delete_family(client, &family).await.unwrap();
+    delete::delete_note(client, &note).await.unwrap();
+    delete::delete_tag(client, &tag).await.unwrap();
+    delete::delete_repository(client, &repo).await.unwrap();
+    delete::delete_media(client, &media).await.unwrap();
 }
