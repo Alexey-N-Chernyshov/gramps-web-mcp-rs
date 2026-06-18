@@ -11,7 +11,7 @@ env:
 
 jobs:
   check:
-    name: Check
+    name: Lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -28,4 +28,3 @@ jobs:
 
       - name: machete
         uses: bnjbvr/cargo-machete@main
-
