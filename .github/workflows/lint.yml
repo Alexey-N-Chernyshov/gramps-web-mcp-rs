@@ -1,4 +1,4 @@
-name: CI
+name: Lint
 
 on:
   push:
@@ -29,5 +29,3 @@ jobs:
       - name: machete
         uses: bnjbvr/cargo-machete@main
 
-      - name: test
-        run: cargo test
