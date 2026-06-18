@@ -386,3 +386,41 @@ async fn media_from_path_round_trip() {
         Err(Error::NotFound(_))
     ));
 }
+
+#[tokio::test]
+async fn media_from_url_round_trip() {
+    use tokio::io::AsyncWriteExt as _;
+
+    let fixture = common::TestFixture::new().await;
+    let client = &fixture.client;
+
+    // Serve a tiny JPEG locally — no external deps, guaranteed non-empty response
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let file_url = format!("http://127.0.0.1:{port}/photo.jpg");
+
+    tokio::spawn(async move {
+        if let Ok((mut sock, _)) = listener.accept().await {
+            let _ = sock
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: image/jpeg\r\nContent-Length: 3\r\n\r\nABC",
+                )
+                .await;
+        }
+    });
+
+    let handle = create::create_media_from_url(client, &file_url, Some("Downloaded photo"), None)
+        .await
+        .unwrap();
+
+    let media = get::get_media(client, &handle).await.unwrap();
+    assert_eq!(media["handle"].as_str(), Some(handle.as_str()));
+    assert_eq!(media["desc"].as_str(), Some("Downloaded photo"));
+    assert_eq!(media["mime"].as_str(), Some("image/jpeg"));
+
+    delete::delete_media(client, &handle).await.unwrap();
+    assert!(matches!(
+        get::get_media(client, &handle).await,
+        Err(Error::NotFound(_))
+    ));
+}

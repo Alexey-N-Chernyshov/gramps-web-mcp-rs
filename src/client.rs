@@ -94,18 +94,20 @@ impl GrampsClient {
         self.parse(resp).await
     }
 
-    /// POST /api/{path} with a multipart form body, return deserialised response.
-    pub async fn post_multipart<T: DeserializeOwned>(
+    /// POST /api/{path} with raw bytes and explicit Content-Type, return deserialised response.
+    pub async fn post_bytes<T: DeserializeOwned>(
         &self,
         path: &str,
-        form: reqwest::multipart::Form,
+        bytes: Vec<u8>,
+        content_type: &str,
     ) -> Result<T> {
         let token = self.bearer().await?;
         let resp = self
             .http
             .post(self.url(path))
             .header("Authorization", format!("Bearer {token}"))
-            .multipart(form)
+            .header("Content-Type", content_type)
+            .body(bytes)
             .send()
             .await?;
         self.parse(resp).await

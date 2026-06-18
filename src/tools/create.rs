@@ -114,6 +114,9 @@ pub async fn create_media_from_path(
 }
 
 /// Download a file from a URL and upload it to Gramps as a media object.
+///
+/// The Gramps Web media API expects the file bytes as the raw request body with
+/// `Content-Type` set to the file's MIME type. Description is set via a follow-up PUT.
 pub async fn create_media_from_url(
     client: &GrampsClient,
     url: &str,
@@ -138,30 +141,30 @@ pub async fn create_media_from_url(
         .or(content_type)
         .unwrap_or_else(|| "application/octet-stream".to_string());
 
-    let filename = url
-        .split('/')
-        .next_back()
-        .filter(|s| !s.is_empty())
-        .unwrap_or("file")
-        .to_string();
-
     let bytes = file_resp
         .bytes()
         .await
         .map_err(crate::client::Error::Http)?;
 
-    let part = reqwest::multipart::Part::bytes(bytes.to_vec())
-        .file_name(filename)
-        .mime_str(&mime_type)
-        .map_err(crate::client::Error::Http)?;
+    let resp: serde_json::Value = client
+        .post_bytes("/api/media/", bytes.to_vec(), &mime_type)
+        .await?;
+    let handle = extract_handle(resp)?;
 
-    let mut form = reqwest::multipart::Form::new().part("file", part);
     if let Some(desc) = description {
-        form = form.text("desc", desc.to_string());
+        client
+            .put::<_, serde_json::Value>(
+                &format!("/api/media/{handle}"),
+                &serde_json::json!({
+                    "handle": handle,
+                    "desc": desc,
+                    "mime": mime_type,
+                }),
+            )
+            .await?;
     }
 
-    let resp: serde_json::Value = client.post_multipart("/api/media/", form).await?;
-    extract_handle(resp)
+    Ok(handle)
 }
 
 fn extract_handle(resp: serde_json::Value) -> Result<Handle> {
