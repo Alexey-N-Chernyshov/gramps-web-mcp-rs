@@ -1,7 +1,7 @@
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-#[derive(Deserialize, JsonSchema, Clone, Copy, strum::IntoStaticStr)]
+#[derive(JsonSchema, Clone, Copy, Debug, strum::IntoStaticStr)]
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
 pub enum ObjectType {
@@ -15,6 +15,44 @@ pub enum ObjectType {
     Media,
     Repository,
     Tag,
+}
+
+const VALID_OBJECT_TYPES: &str =
+    "person, family, event, place, note, citation, source, media, repository, tag";
+
+impl<'de> serde::Deserialize<'de> for ObjectType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Visitor;
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = ObjectType;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                write!(f, "one of: {VALID_OBJECT_TYPES}")
+            }
+            fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<ObjectType, E> {
+                match v {
+                    "person" => Ok(ObjectType::Person),
+                    "family" => Ok(ObjectType::Family),
+                    "event" => Ok(ObjectType::Event),
+                    "place" => Ok(ObjectType::Place),
+                    "note" => Ok(ObjectType::Note),
+                    "citation" => Ok(ObjectType::Citation),
+                    "source" => Ok(ObjectType::Source),
+                    "media" => Ok(ObjectType::Media),
+                    "repository" => Ok(ObjectType::Repository),
+                    "tag" => Ok(ObjectType::Tag),
+                    _ => Err(E::custom(format!(
+                        "unknown object_type \"{v}\", expected one of: {VALID_OBJECT_TYPES}"
+                    ))),
+                }
+            }
+            fn visit_unit<E: serde::de::Error>(self) -> Result<ObjectType, E> {
+                Err(E::custom(format!(
+                    "`object_type` is required, expected one of: {VALID_OBJECT_TYPES}"
+                )))
+            }
+        }
+        deserializer.deserialize_any(Visitor)
+    }
 }
 
 impl ObjectType {
@@ -49,8 +87,9 @@ pub struct SearchInput {
     pub pagesize: Option<u32>,
 }
 
-#[derive(Deserialize, JsonSchema)]
+#[derive(Deserialize, JsonSchema, Debug)]
 pub struct GetObjectInput {
+    /// Required. One of: person, family, event, place, note, citation, source, media, repository, tag.
     pub object_type: ObjectType,
     /// Handle of a specific object — returns a single record.
     pub handle: Option<String>,
@@ -179,4 +218,71 @@ pub struct CreateMediaInput {
     pub description: Option<String>,
     /// MIME type, e.g. "image/jpeg". Detected automatically for URL downloads.
     pub mime: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn get_object_null_type_returns_helpful_error() {
+        let json = r#"{"object_type": null, "handle": "abc123"}"#;
+        let msg = serde_json::from_str::<GetObjectInput>(json)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            msg.contains("object_type"),
+            "error should mention object_type: {msg}"
+        );
+        assert!(
+            msg.contains("person"),
+            "error should list valid values: {msg}"
+        );
+    }
+
+    #[test]
+    fn get_object_missing_type_returns_error() {
+        let json = r#"{"handle": "abc123"}"#;
+        assert!(serde_json::from_str::<GetObjectInput>(json).is_err());
+    }
+
+    #[test]
+    fn get_object_valid_types_deserialize() {
+        for (s, expected) in [
+            ("person", ObjectType::Person),
+            ("family", ObjectType::Family),
+            ("event", ObjectType::Event),
+            ("place", ObjectType::Place),
+            ("note", ObjectType::Note),
+            ("citation", ObjectType::Citation),
+            ("source", ObjectType::Source),
+            ("media", ObjectType::Media),
+            ("repository", ObjectType::Repository),
+            ("tag", ObjectType::Tag),
+        ] {
+            let json = format!(r#"{{"object_type": "{s}", "handle": "h"}}"#);
+            let input: GetObjectInput = serde_json::from_str(&json).unwrap();
+            assert_eq!(
+                input.object_type.as_endpoint(),
+                expected.as_endpoint(),
+                "object_type \"{s}\" should deserialize correctly"
+            );
+        }
+    }
+
+    #[test]
+    fn get_object_invalid_type_returns_helpful_error() {
+        let json = r#"{"object_type": "dinosaur", "handle": "h"}"#;
+        let msg = serde_json::from_str::<GetObjectInput>(json)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            msg.contains("dinosaur"),
+            "error should echo the bad value: {msg}"
+        );
+        assert!(
+            msg.contains("person"),
+            "error should list valid values: {msg}"
+        );
+    }
 }
