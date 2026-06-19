@@ -62,12 +62,16 @@ pub async fn get_object_collection(
     client: &GrampsClient,
     endpoint: &str,
     gramps_id: Option<&str>,
+    gql: Option<&str>,
     page: Option<u32>,
     pagesize: Option<u32>,
 ) -> Result<serde_json::Value> {
     let mut params: Vec<String> = Vec::new();
     if let Some(id) = gramps_id {
         params.push(format!("gramps_id={}", urlencoding::encode(id)));
+    }
+    if let Some(q) = gql {
+        params.push(format!("gql={}", urlencoding::encode(q)));
     }
     if let Some(p) = page {
         params.push(format!("page={p}"));

@@ -31,8 +31,10 @@ use rmcp::{
         wrapper::Parameters,
     },
     model::{
-        CallToolRequestParams, CallToolResult, Content, ErrorCode, Implementation, ListToolsResult,
-        PaginatedRequestParams, ServerCapabilities, ServerInfo,
+        CallToolRequestParams, CallToolResult, Content, ErrorCode, Implementation,
+        ListResourcesResult, ListToolsResult, PaginatedRequestParams, RawResource,
+        ReadResourceRequestParams, ReadResourceResult, ResourceContents, ServerCapabilities,
+        ServerInfo,
     },
     service::RequestContext,
     tool, tool_handler, tool_router, ErrorData as McpError, RoleServer, ServerHandler,
@@ -144,16 +146,27 @@ Use page/pagesize to paginate large result sets (default page=1, pagesize=20).")
 
     // ── Get ─────────────────────────────────────────────────────────────────
 
+    #[tool(
+        description = "Get the GQL (Gramps Query Language) reference: operators, \
+special properties, and object property names by type. \
+Call this before writing a gql filter."
+    )]
+    async fn get_gql_reference(&self) -> Result<CallToolResult, McpError> {
+        Ok(CallToolResult::success(vec![Content::text(GQL_REFERENCE)]))
+    }
+
     #[tool(description = "\
 Get genealogy objects. \
-Provide `handle` for a single record, or `gramps_id`/`page`/`pagesize` to browse a collection. \
-For name/text search use the `search` tool instead.")]
+Provide `handle` for a single record, or `gramps_id` / `gql` / `page` / `pagesize` to browse a collection. \
+Use `gql` for structured filtering (call get_gql_reference for syntax). \
+For full-text search use the `search` tool instead.")]
     async fn get_object(
         &self,
         Parameters(GetObjectInput {
             object_type,
             handle,
             gramps_id,
+            gql,
             page,
             pagesize,
         }): Parameters<GetObjectInput>,
@@ -161,13 +174,20 @@ For name/text search use the `search` tool instead.")]
         let endpoint = object_type.as_endpoint();
         let result = if let Some(h) = handle {
             get::get_object_by_handle(&self.client, endpoint, &h).await
-        } else if gramps_id.is_some() || page.is_some() || pagesize.is_some() {
-            get::get_object_collection(&self.client, endpoint, gramps_id.as_deref(), page, pagesize)
-                .await
+        } else if gramps_id.is_some() || gql.is_some() || page.is_some() || pagesize.is_some() {
+            get::get_object_collection(
+                &self.client,
+                endpoint,
+                gramps_id.as_deref(),
+                gql.as_deref(),
+                page,
+                pagesize,
+            )
+            .await
         } else {
             return Ok(CallToolResult::error(vec![Content::text(
                 "Provide `handle` for a single object, \
-                 or `gramps_id` / `page` / `pagesize` to browse a collection.",
+                 or `gramps_id` / `gql` / `page` / `pagesize` to browse a collection.",
             )]));
         };
         result.map_or_else(api_err, ok_json)
@@ -838,12 +858,50 @@ For name/text search use the `search` tool instead.")]
 #[tool_handler]
 impl ServerHandler for GrampsMcpServer {
     fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
-            .with_instructions("MCP server for accessing genealogy data via the Gramps Web API.")
-            .with_server_info(Implementation::new(
-                "gramps-web-mcp",
-                env!("CARGO_PKG_VERSION"),
-            ))
+        ServerInfo::new(
+            ServerCapabilities::builder()
+                .enable_tools()
+                .enable_resources()
+                .build(),
+        )
+        .with_instructions("MCP server for accessing genealogy data via the Gramps Web API.")
+        .with_server_info(Implementation::new(
+            "gramps-web-mcp",
+            env!("CARGO_PKG_VERSION"),
+        ))
+    }
+
+    async fn list_resources(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListResourcesResult, McpError> {
+        let resource = RawResource::new("gramps://gql-reference", "gql-reference")
+            .with_title("GQL Reference")
+            .with_description("Gramps Query Language syntax, operators and property reference")
+            .with_mime_type("text/markdown");
+        Ok(ListResourcesResult {
+            resources: vec![rmcp::model::Annotated::new(resource, None)],
+            meta: None,
+            next_cursor: None,
+        })
+    }
+
+    async fn read_resource(
+        &self,
+        request: ReadResourceRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ReadResourceResult, McpError> {
+        if request.uri == "gramps://gql-reference" {
+            return Ok(ReadResourceResult::new(vec![ResourceContents::text(
+                GQL_REFERENCE,
+                "gramps://gql-reference",
+            )]));
+        }
+        Err(McpError::invalid_params(
+            format!("Unknown resource: {}", request.uri),
+            None,
+        ))
     }
 
     // WORKAROUND: Claude Desktop does not recognise JSON Schema draft 2020-12
@@ -908,6 +966,8 @@ impl ServerHandler for GrampsMcpServer {
         }
     }
 }
+
+const GQL_REFERENCE: &str = include_str!("resources/gql_reference.md");
 
 // See the WORKAROUND comment on list_tools above.
 fn fix_schema(v: &mut serde_json::Value) {

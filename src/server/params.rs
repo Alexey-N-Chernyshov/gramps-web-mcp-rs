@@ -109,6 +109,8 @@ pub struct GetObjectInput {
     pub handle: Option<String>,
     /// Filter by Gramps ID (e.g. "I0001") — returns a collection.
     pub gramps_id: Option<String>,
+    /// GQL filter expression (call get_gql_reference for full syntax).
+    pub gql: Option<String>,
     /// Page number (1-based) for paginated collection results.
     pub page: Option<u32>,
     /// Results per page for collection results (default 20).
