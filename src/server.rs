@@ -95,14 +95,26 @@ impl GrampsMcpServer {
 
     #[tool(description = "\
 Full-text search across the genealogy database. \
-Set object_type to narrow results to a specific type, or omit to search across all types.")]
+Set object_type to narrow results to a specific type, or omit to search across all types. \
+Use page/pagesize to paginate large result sets (default page=1, pagesize=20).")]
     async fn search(
         &self,
-        Parameters(SearchInput { query, object_type }): Parameters<SearchInput>,
+        Parameters(SearchInput {
+            query,
+            object_type,
+            page,
+            pagesize,
+        }): Parameters<SearchInput>,
     ) -> Result<CallToolResult, McpError> {
-        search::search(&self.client, &query, object_type.map(|t| t.as_str()))
-            .await
-            .map_or_else(api_err, ok_json)
+        search::search(
+            &self.client,
+            &query,
+            object_type.map(|t| t.as_str()),
+            page,
+            pagesize,
+        )
+        .await
+        .map_or_else(api_err, ok_json)
     }
 
     // ── Get ─────────────────────────────────────────────────────────────────

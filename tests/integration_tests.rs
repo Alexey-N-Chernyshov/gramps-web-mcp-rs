@@ -769,7 +769,7 @@ async fn search_endpoints_return_ok() {
     // If a type is not yet indexed, the server returns Ok([]) — still valid.
     macro_rules! assert_search {
         ($query:expr, $type:expr) => {
-            let r = search::search(client, $query, $type)
+            let r = search::search(client, $query, $type, None, None)
                 .await
                 .unwrap_or_else(|e| panic!("search({:?}, {:?}) failed: {e}", $query, $type));
             assert!(
@@ -1017,4 +1017,66 @@ async fn merge_operations() {
         Err(Error::NotFound(_))
     ));
     delete::delete_object(client, "media", &m1).await.unwrap();
+}
+
+#[tokio::test]
+async fn search_pagination() {
+    let fixture = common::TestFixture::new().await;
+    let client = &fixture.client;
+
+    // Create two people with the same distinctive name so search finds at least 2 results.
+    let h1 = create::create_person(
+        client,
+        CreatePersonRequest {
+            primary_name: Some(PersonName {
+                first_name: Some("Pagination".to_string()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    let h2 = create::create_person(
+        client,
+        CreatePersonRequest {
+            primary_name: Some(PersonName {
+                first_name: Some("Pagination".to_string()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    // pagesize=1 must return at most 1 result
+    let page1 = search::search(client, "Pagination", Some("person"), Some(1), Some(1))
+        .await
+        .unwrap();
+    assert!(page1.is_array(), "paginated search should return an array");
+    assert!(
+        page1.as_array().unwrap().len() <= 1,
+        "pagesize=1 should return at most 1 result, got {}",
+        page1.as_array().unwrap().len()
+    );
+
+    // page=2 pagesize=1 — second page should also be an array (may be empty if not yet indexed)
+    let page2 = search::search(client, "Pagination", Some("person"), Some(2), Some(1))
+        .await
+        .unwrap();
+    assert!(page2.is_array(), "page 2 should return an array");
+
+    // No pagination params — should also be fine (backward compat)
+    let all = search::search(client, "Pagination", Some("person"), None, None)
+        .await
+        .unwrap();
+    assert!(
+        all.is_array(),
+        "search without pagination should return an array"
+    );
+
+    delete::delete_object(client, "people", &h1).await.unwrap();
+    delete::delete_object(client, "people", &h2).await.unwrap();
 }

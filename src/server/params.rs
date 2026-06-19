@@ -43,6 +43,10 @@ pub struct SearchInput {
     pub query: String,
     /// Narrow search to a specific object type. Omit to search all types.
     pub object_type: Option<ObjectType>,
+    /// Page number (1-based). Defaults to 1.
+    pub page: Option<u32>,
+    /// Results per page. Defaults to 20.
+    pub pagesize: Option<u32>,
 }
 
 #[derive(Deserialize, JsonSchema)]
