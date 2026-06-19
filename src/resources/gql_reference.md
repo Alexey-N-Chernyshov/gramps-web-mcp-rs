@@ -23,6 +23,32 @@ Numbers and booleans are unquoted.
 - `get_person`, `get_event`, `get_place`, … — dereference a handle to follow relations
 - `[N]` — array index: `child_ref_list[0].ref`
 
+## Type fields (`type.value`)
+
+GQL operates on raw Gramps data where **`type.string` is always empty** for built-in types.
+Use `type.value = <integer>` instead. For custom types, `type.string` contains the custom name.
+
+**Common EventType integers:**
+
+| Value | Type |
+|-------|------|
+| 1 | Marriage |
+| 7 | Divorce |
+| 11 | Adopted |
+| 12 | Birth |
+| 13 | Death |
+| 15 | Baptism |
+| 19 | Burial |
+| 21 | Census |
+| 22 | Christening |
+| 28 | Emigration |
+| 30 | Immigration |
+| 37 | Occupation |
+| 42 | Residence |
+| 44 | Will |
+
+> To find a value for an unlisted type: fetch any event of that type and read `type.value`.
+
 ## Object types
 
 `person`, `family`, `event`, `place`, `citation`, `source`, `repository`, `media`, `note`, `tag`
@@ -37,13 +63,13 @@ Numbers and booleans are unquoted.
 **family** — `gramps_id`, `father_handle`, `mother_handle`,
 `child_ref_list`, `child_ref_list.length`, `event_ref_list`, `tag_list`
 
-**event** — `gramps_id`, `type.string`, `description`,
+**event** — `gramps_id`, `type.value` (integer, see table above), `description`,
 `date.dateval[2]` (year), `date.modifier` (0=normal),
 `date.sortval`, `place`
 
-**place** — `gramps_id`, `title`, `name.value`, `place_type.string`, `lat`, `long`
+**place** — `gramps_id`, `title`, `name.value`, `place_type.value`, `lat`, `long`
 
-**note** — `gramps_id`, `type.string`, `text.string`, `private`
+**note** — `gramps_id`, `type.value`, `text.string`, `private`
 
 **source** — `gramps_id`, `title`, `author`, `pubinfo`, `abbrev`
 
@@ -51,7 +77,7 @@ Numbers and booleans are unquoted.
 
 **media** — `gramps_id`, `path`, `mime`, `desc`
 
-**repository** — `gramps_id`, `name`, `type.string`
+**repository** — `gramps_id`, `name`, `type.value`
 
 **tag** — `name`, `color`, `priority`
 
@@ -64,14 +90,17 @@ primary_name.surname_list[0].surname ~ "Ivanov"
 # First name starts with a Cyrillic prefix
 primary_name.first_name ~ "Ив"
 
+# All Birth events
+type.value = 12
+
+# Death events after year 1900 with exact date
+type.value = 13 and date.modifier = 0 and date.dateval[2] > 1900
+
 # Private notes mentioning "David"
 private and text.string ~ "David"
 
 # Families with more than 5 children
 child_ref_list.length > 5
-
-# Events after year 1900 with exact date
-date.modifier = 0 and date.dateval[2] > 1900
 
 # People with at least one media reference
 media_list.length > 0
