@@ -16,7 +16,7 @@ async fn main() -> Result<(), AppError> {
     let config = config::Config::from_env()?;
 
     tracing::info!(
-        "Starting gramps-mcp-rs, API base: {}",
+        "Starting gramps-web-mcp-rs, API base: {}",
         config.gramps_api_url
     );
 
@@ -40,7 +40,7 @@ async fn run(config: config::Config) -> Result<(), AppError> {
         .await
         .map_err(|e| AppError::ServerInit(Box::new(e)))?;
 
-    tracing::info!("gramps-mcp-rs started on stdio");
+    tracing::info!("gramps-web-mcp-rs started on stdio");
 
     server.waiting().await?;
 

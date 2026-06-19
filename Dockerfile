@@ -13,5 +13,5 @@ COPY . .
 RUN cargo build --release
 
 FROM gcr.io/distroless/cc-debian12:nonroot AS runtime
-COPY --from=builder /app/target/release/gramps-mcp-rs /usr/local/bin/gramps-mcp-rs
-ENTRYPOINT ["/usr/local/bin/gramps-mcp-rs"]
+COPY --from=builder /app/target/release/gramps-web-mcp-rs /usr/local/bin/gramps-web-mcp-rs
+ENTRYPOINT ["/usr/local/bin/gramps-web-mcp-rs"]

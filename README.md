@@ -1,4 +1,4 @@
-# gramps-mcp-rs
+# gramps-web-mcp-rs
 
 MCP server for [Gramps Web](https://www.grampsweb.org/) genealogy API, written in Rust.
 
@@ -14,7 +14,7 @@ MCP server for [Gramps Web](https://www.grampsweb.org/) genealogy API, written i
 **1. Pull the image**
 
 ```bash
-curl -O https://raw.githubusercontent.com/Alexey-N-Chernyshov/gramps-mcp-rs/main/docker-compose.yml
+curl -O https://raw.githubusercontent.com/Alexey-N-Chernyshov/gramps-web-mcp-rs/main/docker-compose.yml
 docker compose pull
 ```
 
@@ -27,7 +27,7 @@ For Claude Desktop, add to `~/Library/Application Support/Claude/claude_desktop_
 ```json
 {
   "mcpServers": {
-    "gramps": {
+    "gramps-web": {
       "command": "docker",
       "args": [
         "run",
@@ -41,7 +41,7 @@ For Claude Desktop, add to `~/Library/Application Support/Claude/claude_desktop_
         "GRAMPS_PASSWORD",
         "-e",
         "GRAMPS_READONLY",
-        "ghcr.io/alexey-n-chernyshov/gramps-mcp-rs:latest"
+        "ghcr.io/alexey-n-chernyshov/gramps-web-mcp-rs:latest"
       ],
       "env": {
         "GRAMPS_API_URL": "https://gramps.example.com",

@@ -17,9 +17,8 @@ use rmcp::{
         wrapper::Parameters,
     },
     model::{
-        CallToolRequestParams, CallToolResult, Content, ErrorCode, Implementation,
-        ListResourcesResult, ListToolsResult, PaginatedRequestParams, ReadResourceRequestParams,
-        ReadResourceResult, ServerCapabilities, ServerInfo,
+        CallToolRequestParams, CallToolResult, Content, ErrorCode, Implementation, ListToolsResult,
+        PaginatedRequestParams, ServerCapabilities, ServerInfo,
     },
     service::RequestContext,
     tool, tool_handler, tool_router, ErrorData as McpError, RoleServer, ServerHandler,
@@ -33,7 +32,7 @@ pub struct GrampsMcpServer {
 impl GrampsMcpServer {
     pub fn new(config: Config) -> Result<Self, reqwest::Error> {
         let http = reqwest::Client::builder()
-            .user_agent(concat!("gramps-mcp-rs/", env!("CARGO_PKG_VERSION")))
+            .user_agent(concat!("gramps-web-mcp-rs/", env!("CARGO_PKG_VERSION")))
             .build()?;
         let mut tools = Self::tool_router();
         if config.gramps_readonly {
@@ -772,37 +771,12 @@ For name/text search use the `search` tool instead.")]
 #[tool_handler]
 impl ServerHandler for GrampsMcpServer {
     fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(
-            ServerCapabilities::builder()
-                .enable_tools()
-                .enable_resources()
-                .build(),
-        )
-        .with_instructions("MCP server for querying and updating genealogy data in Gramps Web.")
-        .with_server_info(Implementation::new("gramps-mcp", env!("CARGO_PKG_VERSION")))
-    }
-
-    async fn list_resources(
-        &self,
-        _request: Option<PaginatedRequestParams>,
-        _context: RequestContext<RoleServer>,
-    ) -> Result<ListResourcesResult, McpError> {
-        Ok(ListResourcesResult {
-            resources: vec![],
-            meta: None,
-            next_cursor: None,
-        })
-    }
-
-    async fn read_resource(
-        &self,
-        request: ReadResourceRequestParams,
-        _context: RequestContext<RoleServer>,
-    ) -> Result<ReadResourceResult, McpError> {
-        Err(McpError::invalid_params(
-            format!("Unknown resource: {}", request.uri),
-            None,
-        ))
+        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+            .with_instructions("MCP server for accessing genealogy data via the Gramps Web API.")
+            .with_server_info(Implementation::new(
+                "gramps-web-mcp",
+                env!("CARGO_PKG_VERSION"),
+            ))
     }
 
     // WORKAROUND: Claude Desktop does not recognise JSON Schema draft 2020-12

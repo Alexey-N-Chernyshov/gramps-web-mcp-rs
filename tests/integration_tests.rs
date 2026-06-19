@@ -1,6 +1,6 @@
 mod common;
 
-use gramps_mcp_rs::{
+use gramps_web_mcp_rs::{
     client::{Error, GrampsClient},
     config::Config,
     models::{

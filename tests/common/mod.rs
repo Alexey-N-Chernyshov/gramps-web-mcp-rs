@@ -1,4 +1,4 @@
-use gramps_mcp_rs::{client::GrampsClient, config::Config};
+use gramps_web_mcp_rs::{client::GrampsClient, config::Config};
 use std::time::Duration;
 use testcontainers::{
     core::{wait::HttpWaitStrategy, IntoContainerPort, WaitFor},

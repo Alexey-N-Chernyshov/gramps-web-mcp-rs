@@ -1,4 +1,4 @@
 services:
   gramps-mcp:
     build: .
-    image: gramps-mcp-rs:dev
+    image: gramps-web-mcp-rs:dev
