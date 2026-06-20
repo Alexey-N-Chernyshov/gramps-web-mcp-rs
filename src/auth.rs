@@ -59,10 +59,12 @@ impl AuthManager {
 
         if let Some(ref t) = *guard {
             if chrono::Utc::now() < t.expires_at - chrono::Duration::seconds(30) {
+                tracing::trace!("using cached JWT token");
                 return Ok(t.value.clone());
             }
         }
 
+        tracing::debug!("JWT token expired or missing, refreshing");
         let token = self.fetch_token().await?;
         let value = token.value.clone();
         *guard = Some(token);
@@ -75,6 +77,7 @@ impl AuthManager {
             self.config.gramps_api_url.trim_end_matches('/')
         );
 
+        tracing::debug!("fetching JWT token from {url}");
         let resp = self
             .client
             .post(&url)
@@ -88,6 +91,7 @@ impl AuthManager {
         if !resp.status().is_success() {
             let status = resp.status().as_u16();
             let body = resp.text().await.unwrap_or_default();
+            tracing::error!(status, %body, "JWT authentication failed");
             return Err(Error::Failed(format!("status={status}: {body}")));
         }
 
@@ -104,6 +108,7 @@ impl AuthManager {
 
         let expires_at = decode_exp(&access);
 
+        tracing::debug!(expires_at = %expires_at, "JWT token obtained");
         Ok(Token {
             value: access,
             expires_at,

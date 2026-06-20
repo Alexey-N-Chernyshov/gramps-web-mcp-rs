@@ -64,6 +64,7 @@ impl GrampsClient {
 
     /// GET /api/{path} and deserialise the response body.
     pub async fn get<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
+        tracing::debug!("GET {path}");
         let token = self.bearer().await?;
         let resp = self
             .http
@@ -80,6 +81,7 @@ impl GrampsClient {
         path: &str,
         body: &B,
     ) -> Result<T> {
+        tracing::debug!("POST {path}");
         let token = self.bearer().await?;
         let resp = self
             .http
@@ -97,6 +99,7 @@ impl GrampsClient {
         path: &str,
         body: &B,
     ) -> Result<T> {
+        tracing::debug!("PUT {path}");
         let token = self.bearer().await?;
         let resp = self
             .http
@@ -115,6 +118,7 @@ impl GrampsClient {
         bytes: Vec<u8>,
         content_type: &str,
     ) -> Result<T> {
+        tracing::debug!("POST {path} (bytes, content-type={content_type})");
         let token = self.bearer().await?;
         let resp = self
             .http
@@ -129,6 +133,7 @@ impl GrampsClient {
 
     /// DELETE /api/{path}, expects no response body.
     pub async fn delete(&self, path: &str) -> Result<()> {
+        tracing::debug!("DELETE {path}");
         let token = self.bearer().await?;
         let resp = self
             .http
@@ -138,10 +143,12 @@ impl GrampsClient {
             .await?;
         let status = resp.status();
         if status == reqwest::StatusCode::NOT_FOUND {
+            tracing::debug!(path, "not found");
             return Err(Error::NotFound(resp.url().path().to_string()));
         }
         if !status.is_success() {
             let body = resp.text().await.unwrap_or_default();
+            tracing::warn!(status = status.as_u16(), %body, "API error response");
             return Err(Error::Api {
                 status: status.as_u16(),
                 body,
@@ -153,10 +160,12 @@ impl GrampsClient {
     async fn parse<T: DeserializeOwned>(&self, resp: reqwest::Response) -> Result<T> {
         let status = resp.status();
         if status == reqwest::StatusCode::NOT_FOUND {
+            tracing::debug!(path = resp.url().path(), "not found");
             return Err(Error::NotFound(resp.url().path().to_string()));
         }
         if !status.is_success() {
             let body = resp.text().await.unwrap_or_default();
+            tracing::warn!(status = status.as_u16(), %body, "API error response");
             return Err(Error::Api {
                 status: status.as_u16(),
                 body,
@@ -166,9 +175,12 @@ impl GrampsClient {
             status: status.as_u16(),
             body: format!("failed to read body: {e}"),
         })?;
-        serde_json::from_str(&body).map_err(|e| Error::Api {
-            status: status.as_u16(),
-            body: format!("JSON parse error ({e}); raw body: {body}"),
+        serde_json::from_str(&body).map_err(|e| {
+            tracing::error!(%e, "failed to deserialize API response");
+            Error::Api {
+                status: status.as_u16(),
+                body: format!("JSON parse error ({e}); raw body: {body}"),
+            }
         })
     }
 }
