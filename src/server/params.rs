@@ -192,9 +192,15 @@ pub struct MergeFamilyInput {
     pub phoenix_mother_handle: Option<String>,
 }
 
+fn json_object_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({ "type": "object" })
+}
+
 #[derive(Deserialize, JsonSchema)]
 pub struct UpdateInput {
     pub handle: String,
+    /// The full object to replace the existing record with (must be a JSON object, not a string).
+    #[schemars(schema_with = "json_object_schema")]
     pub data: serde_json::Value,
 }
 
@@ -297,6 +303,33 @@ mod tests {
         assert!(
             msg.contains("person"),
             "error should list valid values: {msg}"
+        );
+    }
+
+    #[test]
+    fn update_input_accepts_json_object() {
+        let json = r#"{"handle": "abc123", "data": {"gramps_id": "I0001"}}"#;
+        let input: UpdateInput = serde_json::from_str(json).unwrap();
+        assert!(input.data.is_object());
+    }
+
+    #[test]
+    fn update_input_accepts_json_string_as_data() {
+        // serde accepts strings (schema hint + runtime check in server.rs catches this)
+        let json = r#"{"handle": "abc123", "data": "{\"gramps_id\":\"I0001\"}"}"#;
+        let input: UpdateInput = serde_json::from_str(json).unwrap();
+        assert!(input.data.is_string(), "deserialized as string, not object");
+    }
+
+    #[test]
+    fn update_input_data_schema_is_object_type() {
+        let schema = schemars::schema_for!(UpdateInput);
+        let schema_json = serde_json::to_value(&schema).unwrap();
+        let data_schema = &schema_json["properties"]["data"];
+        assert_eq!(
+            data_schema["type"].as_str(),
+            Some("object"),
+            "data field schema must constrain type to 'object', got: {data_schema}"
         );
     }
 }

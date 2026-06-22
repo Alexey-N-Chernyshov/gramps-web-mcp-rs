@@ -103,6 +103,16 @@ fn api_err(e: impl std::fmt::Display) -> Result<CallToolResult, McpError> {
     Ok(CallToolResult::error(vec![Content::text(e.to_string())]))
 }
 
+fn require_object(data: &serde_json::Value) -> Option<Result<CallToolResult, McpError>> {
+    if data.is_object() {
+        None
+    } else {
+        Some(Ok(CallToolResult::error(vec![Content::text(
+            "`data` must be a JSON object — pass the full object returned by get_object, not a string",
+        )])))
+    }
+}
+
 #[tool_router]
 impl GrampsMcpServer {
     // ── Search ──────────────────────────────────────────────────────────────
@@ -481,6 +491,9 @@ For name/text search use the `search` tool instead.")]
         &self,
         Parameters(UpdateInput { handle, data }): Parameters<UpdateInput>,
     ) -> Result<CallToolResult, McpError> {
+        if let Some(err) = require_object(&data) {
+            return err;
+        }
         update::update_person(&self.client, &handle, &data)
             .await
             .map_or_else(api_err, ok_json)
@@ -493,6 +506,9 @@ For name/text search use the `search` tool instead.")]
         &self,
         Parameters(UpdateInput { handle, data }): Parameters<UpdateInput>,
     ) -> Result<CallToolResult, McpError> {
+        if let Some(err) = require_object(&data) {
+            return err;
+        }
         update::update_family(&self.client, &handle, &data)
             .await
             .map_or_else(api_err, ok_json)
@@ -505,6 +521,9 @@ For name/text search use the `search` tool instead.")]
         &self,
         Parameters(UpdateInput { handle, data }): Parameters<UpdateInput>,
     ) -> Result<CallToolResult, McpError> {
+        if let Some(err) = require_object(&data) {
+            return err;
+        }
         update::update_event(&self.client, &handle, &data)
             .await
             .map_or_else(api_err, ok_json)
@@ -517,6 +536,9 @@ For name/text search use the `search` tool instead.")]
         &self,
         Parameters(UpdateInput { handle, data }): Parameters<UpdateInput>,
     ) -> Result<CallToolResult, McpError> {
+        if let Some(err) = require_object(&data) {
+            return err;
+        }
         update::update_place(&self.client, &handle, &data)
             .await
             .map_or_else(api_err, ok_json)
@@ -529,6 +551,9 @@ For name/text search use the `search` tool instead.")]
         &self,
         Parameters(UpdateInput { handle, data }): Parameters<UpdateInput>,
     ) -> Result<CallToolResult, McpError> {
+        if let Some(err) = require_object(&data) {
+            return err;
+        }
         update::update_source(&self.client, &handle, &data)
             .await
             .map_or_else(api_err, ok_json)
@@ -541,6 +566,9 @@ For name/text search use the `search` tool instead.")]
         &self,
         Parameters(UpdateInput { handle, data }): Parameters<UpdateInput>,
     ) -> Result<CallToolResult, McpError> {
+        if let Some(err) = require_object(&data) {
+            return err;
+        }
         update::update_citation(&self.client, &handle, &data)
             .await
             .map_or_else(api_err, ok_json)
@@ -553,6 +581,9 @@ For name/text search use the `search` tool instead.")]
         &self,
         Parameters(UpdateInput { handle, data }): Parameters<UpdateInput>,
     ) -> Result<CallToolResult, McpError> {
+        if let Some(err) = require_object(&data) {
+            return err;
+        }
         update::update_repository(&self.client, &handle, &data)
             .await
             .map_or_else(api_err, ok_json)
@@ -565,6 +596,9 @@ For name/text search use the `search` tool instead.")]
         &self,
         Parameters(UpdateInput { handle, data }): Parameters<UpdateInput>,
     ) -> Result<CallToolResult, McpError> {
+        if let Some(err) = require_object(&data) {
+            return err;
+        }
         update::update_note(&self.client, &handle, &data)
             .await
             .map_or_else(api_err, ok_json)
@@ -577,6 +611,9 @@ For name/text search use the `search` tool instead.")]
         &self,
         Parameters(UpdateInput { handle, data }): Parameters<UpdateInput>,
     ) -> Result<CallToolResult, McpError> {
+        if let Some(err) = require_object(&data) {
+            return err;
+        }
         update::update_tag(&self.client, &handle, &data)
             .await
             .map_or_else(api_err, ok_json)
@@ -589,6 +626,9 @@ For name/text search use the `search` tool instead.")]
         &self,
         Parameters(UpdateInput { handle, data }): Parameters<UpdateInput>,
     ) -> Result<CallToolResult, McpError> {
+        if let Some(err) = require_object(&data) {
+            return err;
+        }
         update::update_media(&self.client, &handle, &data)
             .await
             .map_or_else(api_err, ok_json)
