@@ -199,7 +199,10 @@ fn json_object_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
 #[derive(Deserialize, JsonSchema)]
 pub struct UpdateInput {
     pub handle: String,
-    /// The full object to replace the existing record with (must be a JSON object, not a string).
+    /// Full object body for PUT, matching the shape returned by the corresponding get_object
+    /// call — fetch it first, then modify only the fields you need.
+    /// For dates: "date": {"dateval": [day, month, year, 0], "text": null}, e.g.
+    /// [15, 6, 1867, 0] for June 15, 1867. Use 0 for day/month if unknown.
     #[schemars(schema_with = "json_object_schema")]
     pub data: serde_json::Value,
 }
@@ -233,7 +236,9 @@ pub struct CreateRepositoryInput {
 pub struct CreateMediaInput {
     /// Path to an existing file on the Gramps server (relative to media directory).
     pub path: Option<String>,
-    /// URL to download the file from and upload to Gramps.
+    /// Must be a direct link to the file itself, not a webpage that displays it —
+    /// use the URL that serves the raw bytes (Content-Type: image/... or similar),
+    /// not a gallery or viewer page that returns HTML.
     pub url: Option<String>,
     pub description: Option<String>,
     /// MIME type, e.g. "image/jpeg". Detected automatically for URL downloads.
