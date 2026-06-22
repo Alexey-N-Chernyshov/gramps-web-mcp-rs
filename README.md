@@ -56,12 +56,12 @@ For Claude Desktop, add to `~/Library/Application Support/Claude/claude_desktop_
 
 ### Configuration
 
-| Variable          | Description                                               |
-| ----------------- | --------------------------------------------------------- |
-| `GRAMPS_API_URL`  | Base URL of Gramps Web, e.g. `https://gramps.example.com` |
-| `GRAMPS_USERNAME` | Login username                                            |
-| `GRAMPS_PASSWORD` | Login password                                            |
-| `GRAMPS_READONLY` | Set to `true` to hide all write tools (default: `false`)  |
+| Variable          | Description                                                                                                                                                                                                      |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GRAMPS_API_URL`  | Base URL of Gramps Web, e.g. `https://gramps.example.com`                                                                                                                                                        |
+| `GRAMPS_USERNAME` | Login username                                                                                                                                                                                                   |
+| `GRAMPS_PASSWORD` | Login password                                                                                                                                                                                                   |
+| `GRAMPS_READONLY` | Set to `true` to remove write tools from the model's toolbox (default: `false`). This is a convenience flag, not a security boundary — for actual access control use a Gramps Web account with a read-only role. |
 
 ### Tools
 

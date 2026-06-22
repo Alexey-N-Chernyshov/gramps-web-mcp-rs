@@ -18,6 +18,7 @@ use crate::{
         event::CreateEventRequest, family::CreateFamilyRequest, person::CreatePersonRequest,
         place::CreatePlaceRequest, source::CreateSourceRequest, Handle,
     },
+    tools::get,
 };
 
 pub async fn create_person(client: &GrampsClient, req: CreatePersonRequest) -> Result<Handle> {
@@ -129,8 +130,9 @@ pub async fn create_media_from_path(
 
 /// Download a file from a URL and upload it to Gramps as a media object.
 ///
-/// The Gramps Web media API expects the file bytes as the raw request body with
-/// `Content-Type` set to the file's MIME type. Description is set via a follow-up PUT.
+/// POST /api/media/ with raw bytes creates the record and stores the file, populating
+/// `path` and `checksum`. A follow-up GET+PUT is required to set description/mime without
+/// overwriting those fields (Gramps Web API does a full object replace on PUT).
 pub async fn create_media_from_url(
     client: &GrampsClient,
     url: &str,
@@ -165,18 +167,15 @@ pub async fn create_media_from_url(
         .await?;
     let handle = extract_handle(resp)?;
 
+    // GET the full object so the PUT below doesn't overwrite path/checksum.
+    let mut body = get::get_object_by_handle(client, "media", &handle).await?;
+    body["mime"] = serde_json::json!(mime_type);
     if let Some(desc) = description {
-        client
-            .put::<_, serde_json::Value>(
-                &format!("/api/media/{handle}"),
-                &serde_json::json!({
-                    "handle": handle,
-                    "desc": desc,
-                    "mime": mime_type,
-                }),
-            )
-            .await?;
+        body["desc"] = serde_json::json!(desc);
     }
+    client
+        .put::<_, serde_json::Value>(&format!("/api/media/{handle}"), &body)
+        .await?;
 
     Ok(handle)
 }

@@ -574,6 +574,24 @@ async fn media_from_url_round_trip() {
     assert_eq!(media["desc"].as_str(), Some("Downloaded photo"));
     assert_eq!(media["mime"].as_str(), Some("image/jpeg"));
 
+    // FAILED: path/checksum empty after POST /api/media/ with raw bytes — confirms
+    // the create-then-PUT-file two-step pattern is required, see gramps-web-api #189/#273.
+    let path = media["path"].as_str().unwrap_or("");
+    assert!(
+        !path.is_empty(),
+        "media[\"path\"] is empty after create_media_from_url (got {:?}) — \
+         file was not actually uploaded, only the metadata record was created",
+        media["path"]
+    );
+
+    let checksum = media["checksum"].as_str().unwrap_or("");
+    assert!(
+        !checksum.is_empty(),
+        "media[\"checksum\"] is empty after create_media_from_url (got {:?}) — \
+         file was not actually uploaded, only the metadata record was created",
+        media["checksum"]
+    );
+
     let mut body = media.clone();
     body["desc"] = serde_json::json!("Updated downloaded photo");
     update::update_media(client, &handle, &body).await.unwrap();

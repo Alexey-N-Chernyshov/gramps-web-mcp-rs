@@ -192,9 +192,18 @@ pub struct MergeFamilyInput {
     pub phoenix_mother_handle: Option<String>,
 }
 
+fn json_object_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({ "type": "object" })
+}
+
 #[derive(Deserialize, JsonSchema)]
 pub struct UpdateInput {
     pub handle: String,
+    /// Full object body for PUT, matching the shape returned by the corresponding get_object
+    /// call — fetch it first, then modify only the fields you need.
+    /// For dates: "date": {"dateval": [day, month, year, 0], "text": null}, e.g.
+    /// [15, 6, 1867, 0] for June 15, 1867. Use 0 for day/month if unknown.
+    #[schemars(schema_with = "json_object_schema")]
     pub data: serde_json::Value,
 }
 
@@ -227,7 +236,9 @@ pub struct CreateRepositoryInput {
 pub struct CreateMediaInput {
     /// Path to an existing file on the Gramps server (relative to media directory).
     pub path: Option<String>,
-    /// URL to download the file from and upload to Gramps.
+    /// Must be a direct link to the file itself, not a webpage that displays it —
+    /// use the URL that serves the raw bytes (Content-Type: image/... or similar),
+    /// not a gallery or viewer page that returns HTML.
     pub url: Option<String>,
     pub description: Option<String>,
     /// MIME type, e.g. "image/jpeg". Detected automatically for URL downloads.
@@ -297,6 +308,33 @@ mod tests {
         assert!(
             msg.contains("person"),
             "error should list valid values: {msg}"
+        );
+    }
+
+    #[test]
+    fn update_input_accepts_json_object() {
+        let json = r#"{"handle": "abc123", "data": {"gramps_id": "I0001"}}"#;
+        let input: UpdateInput = serde_json::from_str(json).unwrap();
+        assert!(input.data.is_object());
+    }
+
+    #[test]
+    fn update_input_accepts_json_string_as_data() {
+        // serde accepts strings (schema hint + runtime check in server.rs catches this)
+        let json = r#"{"handle": "abc123", "data": "{\"gramps_id\":\"I0001\"}"}"#;
+        let input: UpdateInput = serde_json::from_str(json).unwrap();
+        assert!(input.data.is_string(), "deserialized as string, not object");
+    }
+
+    #[test]
+    fn update_input_data_schema_is_object_type() {
+        let schema = schemars::schema_for!(UpdateInput);
+        let schema_json = serde_json::to_value(&schema).unwrap();
+        let data_schema = &schema_json["properties"]["data"];
+        assert_eq!(
+            data_schema["type"].as_str(),
+            Some("object"),
+            "data field schema must constrain type to 'object', got: {data_schema}"
         );
     }
 }
