@@ -52,6 +52,8 @@ pub struct Config {
     #[serde(default = "default_http_port")]
     pub mcp_http_port: u16,
     pub mcp_auth_token: Option<String>,
+    #[serde(default)]
+    pub mcp_allowed_hosts: Option<String>,
 }
 
 impl Config {
@@ -62,5 +64,34 @@ impl Config {
             cfg.mcp_auth_token = None;
         }
         Ok(cfg)
+    }
+}
+
+pub fn parse_allowed_hosts(raw: &str) -> Vec<String> {
+    raw.split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_allowed_hosts_trims_and_filters() {
+        let result = parse_allowed_hosts("a:1, b:2 ,c");
+        assert_eq!(result, vec!["a:1", "b:2", "c"]);
+    }
+
+    #[test]
+    fn parse_allowed_hosts_empty_string() {
+        assert!(parse_allowed_hosts("").is_empty());
+    }
+
+    #[test]
+    fn parse_allowed_hosts_only_commas() {
+        assert!(parse_allowed_hosts(", ,").is_empty());
     }
 }

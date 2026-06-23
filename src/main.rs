@@ -78,15 +78,26 @@ async fn run_http(config: config::Config) -> Result<(), AppError> {
     let port = config.mcp_http_port;
     let bind_addr = format!("{host}:{port}");
     let auth_token = config.mcp_auth_token.clone();
+    let allowed_hosts_raw = config.mcp_allowed_hosts.clone();
 
     let mcp_server = server::GrampsMcpServer::new(config)?;
 
+    let http_config = match allowed_hosts_raw.as_deref() {
+        Some(raw) => {
+            let hosts = crate::config::parse_allowed_hosts(raw);
+            if hosts.is_empty() {
+                StreamableHttpServerConfig::default()
+            } else {
+                tracing::info!("HTTP allowed hosts: {:?}", hosts);
+                StreamableHttpServerConfig::default().with_allowed_hosts(hosts)
+            }
+        }
+        None => StreamableHttpServerConfig::default(),
+    };
+
     let session_manager = Arc::new(LocalSessionManager::default());
-    let service = StreamableHttpService::new(
-        move || Ok(mcp_server.clone()),
-        session_manager,
-        StreamableHttpServerConfig::default(),
-    );
+    let service =
+        StreamableHttpService::new(move || Ok(mcp_server.clone()), session_manager, http_config);
 
     let cors = CorsLayer::new()
         .allow_methods([Method::GET, Method::POST, Method::DELETE])
