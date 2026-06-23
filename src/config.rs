@@ -22,6 +22,22 @@ pub enum Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TransportMode {
+    #[default]
+    Stdio,
+    Http,
+}
+
+fn default_http_host() -> String {
+    "0.0.0.0".to_string()
+}
+
+fn default_http_port() -> u16 {
+    3000
+}
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct Config {
     pub gramps_api_url: String,
@@ -29,10 +45,22 @@ pub struct Config {
     pub gramps_password: String,
     #[serde(default)]
     pub gramps_readonly: bool,
+    #[serde(default)]
+    pub mcp_transport: TransportMode,
+    #[serde(default = "default_http_host")]
+    pub mcp_http_host: String,
+    #[serde(default = "default_http_port")]
+    pub mcp_http_port: u16,
+    pub mcp_auth_token: Option<String>,
 }
 
 impl Config {
     pub fn from_env() -> Result<Self> {
-        Ok(envy::from_env::<Config>()?)
+        let mut cfg = envy::from_env::<Config>()?;
+        // Treat MCP_AUTH_TOKEN="" the same as unset
+        if cfg.mcp_auth_token.as_deref() == Some("") {
+            cfg.mcp_auth_token = None;
+        }
+        Ok(cfg)
     }
 }

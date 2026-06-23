@@ -59,6 +59,10 @@ impl TestFixture {
                 gramps_username: TEST_USER.to_string(),
                 gramps_password: TEST_PASS.to_string(),
                 gramps_readonly: false,
+                mcp_transport: Default::default(),
+                mcp_http_host: Default::default(),
+                mcp_http_port: Default::default(),
+                mcp_auth_token: None,
             },
             reqwest::Client::new(),
         );

@@ -1,4 +1,5 @@
 target/
+docs/
 .git/
 .gitignore
 .dockerignore

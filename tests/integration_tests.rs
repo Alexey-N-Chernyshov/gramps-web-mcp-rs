@@ -36,6 +36,10 @@ async fn auth_fails_with_wrong_password() {
             gramps_username: common::TEST_USER.to_string(),
             gramps_password: "wrongpassword".to_string(),
             gramps_readonly: false,
+            mcp_transport: Default::default(),
+            mcp_http_host: Default::default(),
+            mcp_http_port: Default::default(),
+            mcp_auth_token: None,
         },
         reqwest::Client::new(),
     );

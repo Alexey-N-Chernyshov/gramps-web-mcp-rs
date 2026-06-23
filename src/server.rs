@@ -38,6 +38,7 @@ use rmcp::{
     tool, tool_handler, tool_router, ErrorData as McpError, RoleServer, ServerHandler,
 };
 
+#[derive(Clone)]
 pub struct GrampsMcpServer {
     client: GrampsClient,
     tools: ToolRouter<Self>,

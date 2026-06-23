@@ -2,68 +2,31 @@
 
 MCP server for [Gramps Web](https://www.grampsweb.org/) genealogy API, written in Rust.
 
-## For users
+Connects your AI client (Claude Desktop, Claude Code, etc.) directly to your Gramps Web instance. Exposes tools covering search, read, create, update, delete, merge, and transaction operations.
 
-### Prerequisites
+## Setup
 
-- Running [Gramps Web](https://www.grampsweb.org/) instance
-- [Docker](https://docs.docker.com/get-docker/)
+Choose a deployment mode based on where you run the MCP server:
 
-### Setup
+| Mode | When to use | Guide |
+|------|-------------|-------|
+| **Local (stdio)** | AI client and Gramps Web are on the same machine | [docs/setup-local.md](docs/setup-local.md) |
+| **Server-side (HTTP)** | Gramps Web runs on a home server or VPS | [docs/setup-server.md](docs/setup-server.md) |
 
-**1. Pull the image**
+## Configuration
 
-```bash
-curl -O https://raw.githubusercontent.com/Alexey-N-Chernyshov/gramps-web-mcp-rs/main/docker-compose.yml
-docker compose pull
-```
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `GRAMPS_API_URL` | — | Base URL of your Gramps Web instance, e.g. `https://gramps.example.com` or `http://localhost:5000`. Must include the scheme (`http://` or `https://`). |
+| `GRAMPS_USERNAME` | — | Gramps Web username |
+| `GRAMPS_PASSWORD` | — | Gramps Web password |
+| `GRAMPS_READONLY` | `false` | Set to `true` to expose only read tools. Convenience flag — for real access control use a Gramps Web account with the Viewer role. |
+| `MCP_TRANSPORT` | `stdio` | Transport mode: `stdio` or `http` |
+| `MCP_HTTP_HOST` | `0.0.0.0` | Bind host in HTTP mode |
+| `MCP_HTTP_PORT` | `3000` | Bind port in HTTP mode |
+| `MCP_AUTH_TOKEN` | — | Bearer token protecting the `/mcp` endpoint in HTTP mode. If unset, no authentication is performed — only safe on a trusted LAN. |
 
-To update later, run `docker compose pull` again.
-
-**2. Configure your MCP client**
-
-For Claude Desktop, add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "gramps-web": {
-      "command": "docker",
-      "args": [
-        "run",
-        "--rm",
-        "-i",
-        "-e",
-        "GRAMPS_API_URL",
-        "-e",
-        "GRAMPS_USERNAME",
-        "-e",
-        "GRAMPS_PASSWORD",
-        "-e",
-        "GRAMPS_READONLY",
-        "ghcr.io/alexey-n-chernyshov/gramps-web-mcp-rs:latest"
-      ],
-      "env": {
-        "GRAMPS_API_URL": "https://gramps.example.com",
-        "GRAMPS_USERNAME": "your-username",
-        "GRAMPS_PASSWORD": "your-password",
-        "GRAMPS_READONLY": "false"
-      }
-    }
-  }
-}
-```
-
-### Configuration
-
-| Variable          | Description                                                                                                                                                                                                      |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GRAMPS_API_URL`  | Base URL of Gramps Web, e.g. `https://gramps.example.com`                                                                                                                                                        |
-| `GRAMPS_USERNAME` | Login username                                                                                                                                                                                                   |
-| `GRAMPS_PASSWORD` | Login password                                                                                                                                                                                                   |
-| `GRAMPS_READONLY` | Set to `true` to remove write tools from the model's toolbox (default: `false`). This is a convenience flag, not a security boundary — for actual access control use a Gramps Web account with a read-only role. |
-
-### Tools
+## Tools
 
 67 tools across search, get, create, update, delete, merge, and transaction categories. See [docs/tools.md](docs/tools.md) for the full reference.
 
@@ -76,13 +39,12 @@ For Claude Desktop, add to `~/Library/Application Support/Claude/claude_desktop_
 ```bash
 cp .env.example .env
 # edit .env with your values
-
-export $(grep -v '^#' .env | xargs)
-cargo run --release
+cargo run
 ```
 
 ### Docker build
 
 ```bash
 docker compose -f docker-compose.dev.yml build
+docker compose -f docker-compose.dev.yml up
 ```
