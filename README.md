@@ -8,10 +8,11 @@ Connects your AI client (Claude Desktop, Claude Code, etc.) directly to your Gra
 
 Choose a deployment mode based on where you run the MCP server:
 
-| Mode                   | When to use                                      | Guide                                        |
-| ---------------------- | ------------------------------------------------ | -------------------------------------------- |
-| **Local (stdio)**      | AI client and Gramps Web are on the same machine | [docs/setup-local.md](docs/setup-local.md)   |
-| **Server-side (HTTP)** | Gramps Web runs on a home server or VPS          | [docs/setup-server.md](docs/setup-server.md) |
+| Mode                        | When to use                                               | Guide                                                          |
+| --------------------------- | --------------------------------------------------------- | -------------------------------------------------------------- |
+| **Local (stdio)**           | AI client and Gramps Web are on the same machine          | [docs/setup-local.md](docs/setup-local.md)                     |
+| **LAN / VPN (HTTP)**        | Gramps Web is on a home server, reachable via LAN or VPN  | [docs/setup-server-lan.md](docs/setup-server-lan.md)           |
+| **Public server (HTTP+TLS)**| Gramps Web is exposed to the internet via reverse proxy   | [docs/setup-server-public.md](docs/setup-server-public.md)     |
 
 ## Configuration
 
