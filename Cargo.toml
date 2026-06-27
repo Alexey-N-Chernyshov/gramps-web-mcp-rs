@@ -44,6 +44,11 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 strum = { version = "0.28", features = ["derive"] }
 urlencoding = "2"
 
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
+
 [dev-dependencies]
 tokio-test = "0.4"
 testcontainers = { version = "0.27", features = ["http_wait"] }
