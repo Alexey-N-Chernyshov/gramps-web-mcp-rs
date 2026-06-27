@@ -872,7 +872,7 @@ async fn get_object_collection_pagination_and_gramps_id() {
         .unwrap();
 
     // plain collection browse returns an array
-    let all = get::get_object_collection(client, "people", None, None, None)
+    let all = get::get_object_collection(client, "people", None, None, None, None)
         .await
         .unwrap();
     assert!(
@@ -881,7 +881,7 @@ async fn get_object_collection_pagination_and_gramps_id() {
     );
 
     // pagination: page=1 pagesize=1 must return at most 1 item
-    let page1 = get::get_object_collection(client, "people", None, Some(1), Some(1))
+    let page1 = get::get_object_collection(client, "people", None, None, Some(1), Some(1))
         .await
         .unwrap();
     assert!(page1.is_array());
@@ -895,7 +895,7 @@ async fn get_object_collection_pagination_and_gramps_id() {
         .await
         .unwrap();
     let gramps_id = obj["gramps_id"].as_str().expect("gramps_id missing");
-    let by_id = get::get_object_collection(client, "people", Some(gramps_id), None, None)
+    let by_id = get::get_object_collection(client, "people", Some(gramps_id), None, None, None)
         .await
         .unwrap();
     assert!(by_id.is_array());
@@ -1116,4 +1116,107 @@ async fn search_pagination() {
 
     delete::delete_object(client, "people", &h1).await.unwrap();
     delete::delete_object(client, "people", &h2).await.unwrap();
+}
+
+#[tokio::test]
+async fn oql_filter_people_by_gramps_id() {
+    let fixture = common::TestFixture::new().await;
+    let client = &fixture.client;
+
+    let handle = create::create_person(client, CreatePersonRequest::default())
+        .await
+        .unwrap();
+
+    let obj = get::get_object_by_handle(client, "people", &handle)
+        .await
+        .unwrap();
+    let gramps_id = obj["gramps_id"].as_str().expect("gramps_id missing");
+
+    let query = format!(r#"person.gramps_id == "{gramps_id}""#);
+    let result = get::get_object_collection(client, "people", None, Some(&query), None, None)
+        .await
+        .unwrap();
+
+    assert!(result.is_array(), "oql filter should return an array");
+    let items = result.as_array().unwrap();
+    assert!(
+        items
+            .iter()
+            .any(|p| p["handle"].as_str() == Some(handle.as_str())),
+        "oql filter should find the created person"
+    );
+
+    // oql and pagesize work together
+    let paged = get::get_object_collection(client, "people", None, Some(&query), Some(1), Some(1))
+        .await
+        .unwrap();
+    assert!(paged.is_array(), "oql + pagesize=1 should return an array");
+    assert!(
+        paged.as_array().unwrap().len() <= 1,
+        "pagesize=1 should cap results"
+    );
+
+    delete::delete_object(client, "people", &handle)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn oql_filter_families_by_child_count() {
+    let fixture = common::TestFixture::new().await;
+    let client = &fixture.client;
+
+    let child = create::create_person(client, CreatePersonRequest::default())
+        .await
+        .unwrap();
+
+    let empty_family = create::create_family(client, CreateFamilyRequest::default())
+        .await
+        .unwrap();
+
+    let family_with_child = create::create_family(
+        client,
+        CreateFamilyRequest {
+            child_ref_list: Some(vec![serde_json::json!({"ref": child})]),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    let result = get::get_object_collection(
+        client,
+        "families",
+        None,
+        Some("len(family.get_child_ref_list()) > 0"),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+
+    assert!(result.is_array(), "oql filter should return an array");
+    let items = result.as_array().unwrap();
+    assert!(
+        items
+            .iter()
+            .any(|f| f["handle"].as_str() == Some(family_with_child.as_str())),
+        "family with child should be in results"
+    );
+    assert!(
+        !items
+            .iter()
+            .any(|f| f["handle"].as_str() == Some(empty_family.as_str())),
+        "family without children should not be in results"
+    );
+
+    delete::delete_object(client, "families", &empty_family)
+        .await
+        .unwrap();
+    delete::delete_object(client, "families", &family_with_child)
+        .await
+        .unwrap();
+    delete::delete_object(client, "people", &child)
+        .await
+        .unwrap();
 }
