@@ -35,9 +35,7 @@ RUN case "$TARGETARCH" in \
     cp target/$RUST_TARGET/release/gramps-web-mcp-rs /gramps-web-mcp-rs && \
     cargo about generate -c .config/about.toml .config/about.hbs -o THIRD_PARTY_NOTICES.html
 
-FROM alpine:3.21 AS runtime
-RUN addgroup -S nonroot && adduser -S nonroot -G nonroot
+FROM gcr.io/distroless/static-debian12:nonroot AS runtime
 COPY --from=builder /gramps-web-mcp-rs /usr/local/bin/gramps-web-mcp-rs
 COPY --from=builder /app/THIRD_PARTY_NOTICES.html /THIRD_PARTY_NOTICES.html
-USER nonroot
 ENTRYPOINT ["/usr/local/bin/gramps-web-mcp-rs"]
