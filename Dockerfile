@@ -12,8 +12,7 @@ WORKDIR /app
 ENV CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc \
     CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc \
     CC_x86_64_unknown_linux_musl=musl-gcc \
-    CC_aarch64_unknown_linux_musl=musl-gcc \
-    RUSTFLAGS="-C target-feature=+crt-static"
+    CC_aarch64_unknown_linux_musl=musl-gcc
 
 FROM chef AS planner
 COPY . .
@@ -36,7 +35,9 @@ RUN case "$TARGETARCH" in \
     cp target/$RUST_TARGET/release/gramps-web-mcp-rs /gramps-web-mcp-rs && \
     cargo about generate -c .config/about.toml .config/about.hbs -o THIRD_PARTY_NOTICES.html
 
-FROM gcr.io/distroless/static-debian12:nonroot AS runtime
+FROM alpine:3.21 AS runtime
+RUN addgroup -S nonroot && adduser -S nonroot -G nonroot
 COPY --from=builder /gramps-web-mcp-rs /usr/local/bin/gramps-web-mcp-rs
 COPY --from=builder /app/THIRD_PARTY_NOTICES.html /THIRD_PARTY_NOTICES.html
+USER nonroot
 ENTRYPOINT ["/usr/local/bin/gramps-web-mcp-rs"]
