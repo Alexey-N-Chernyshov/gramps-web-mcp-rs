@@ -172,6 +172,12 @@ For full-text search use the `search` tool instead.")]
             pagesize,
         }): Parameters<GetObjectInput>,
     ) -> Result<CallToolResult, McpError> {
+        let Some(object_type) = object_type else {
+            return Ok(CallToolResult::error(vec![Content::text(
+                "`object_type` is required. Specify one of: \
+                 person, family, event, place, note, citation, source, media, repository, tag",
+            )]));
+        };
         let result = if let Some(h) = handle {
             get::get_object_by_handle(&self.client, object_type.as_endpoint(), &h).await
         } else if gramps_id.is_some() || oql.is_some() || page.is_some() || pagesize.is_some() {
@@ -673,6 +679,12 @@ For full-text search use the `search` tool instead.")]
             handle,
         }): Parameters<DeleteObjectInput>,
     ) -> Result<CallToolResult, McpError> {
+        let Some(object_type) = object_type else {
+            return Ok(CallToolResult::error(vec![Content::text(
+                "`object_type` is required. Specify one of: \
+                 person, family, event, place, note, citation, source, media, repository, tag",
+            )]));
+        };
         delete::delete_object(&self.client, object_type.as_endpoint(), &handle)
             .await
             .map_or_else(api_err, |_| {

@@ -104,7 +104,8 @@ pub struct SearchInput {
 #[derive(Deserialize, JsonSchema, Debug)]
 pub struct GetObjectInput {
     /// Required. One of: person, family, event, place, note, citation, source, media, repository, tag.
-    pub object_type: ObjectType,
+    #[schemars(required)]
+    pub object_type: Option<ObjectType>,
     /// Handle of a specific object — returns a single record.
     pub handle: Option<String>,
     /// Filter by Gramps ID (e.g. "I0001") — returns a collection.
@@ -124,7 +125,8 @@ pub struct HandleInput {
 
 #[derive(Deserialize, JsonSchema)]
 pub struct DeleteObjectInput {
-    pub object_type: ObjectType,
+    #[schemars(required)]
+    pub object_type: Option<ObjectType>,
     pub handle: String,
 }
 
@@ -258,25 +260,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn get_object_null_type_returns_helpful_error() {
+    fn get_object_null_type_deserializes_to_none() {
         let json = r#"{"object_type": null, "handle": "abc123"}"#;
-        let msg = serde_json::from_str::<GetObjectInput>(json)
-            .unwrap_err()
-            .to_string();
+        let input: GetObjectInput = serde_json::from_str(json).unwrap();
         assert!(
-            msg.contains("object_type"),
-            "error should mention object_type: {msg}"
-        );
-        assert!(
-            msg.contains("person"),
-            "error should list valid values: {msg}"
+            input.object_type.is_none(),
+            "null object_type should deserialize to None so the handler can return a visible tool error"
         );
     }
 
     #[test]
-    fn get_object_missing_type_returns_error() {
+    fn get_object_missing_type_deserializes_to_none() {
         let json = r#"{"handle": "abc123"}"#;
-        assert!(serde_json::from_str::<GetObjectInput>(json).is_err());
+        let input: GetObjectInput = serde_json::from_str(json).unwrap();
+        assert!(input.object_type.is_none());
     }
 
     #[test]
@@ -296,7 +293,7 @@ mod tests {
             let json = format!(r#"{{"object_type": "{s}", "handle": "h"}}"#);
             let input: GetObjectInput = serde_json::from_str(&json).unwrap();
             assert_eq!(
-                input.object_type.as_endpoint(),
+                input.object_type.unwrap().as_endpoint(),
                 expected.as_endpoint(),
                 "object_type \"{s}\" should deserialize correctly"
             );
