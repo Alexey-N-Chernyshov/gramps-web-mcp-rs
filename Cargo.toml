@@ -26,7 +26,7 @@ reqwest = { version = "0.13", features = [
     "rustls",
     "rustls-native-certs",
 ], default-features = false }
-rmcp = { version = "1.7", features = [
+rmcp = { version = "2.0", features = [
     "server",
     "transport-io",
     "transport-streamable-http-server",
