@@ -70,24 +70,6 @@ docker compose up -d gramps-mcp
 
 Replace `gramps.example.com` with your actual domain, and `your-secret-token` with the token from Step 2. The URL always uses `https://`.
 
-### Claude Desktop
-
-> **Note:** HTTP transport support in Claude Desktop is relatively new — make sure you're running the latest version.
-
-```json
-{
-  "mcpServers": {
-    "gramps-web": {
-      "type": "http",
-      "url": "https://gramps.example.com/mcp/",
-      "headers": {
-        "Authorization": "Bearer your-secret-token"
-      }
-    }
-  }
-}
-```
-
 ### Claude Code
 
 Via CLI:
