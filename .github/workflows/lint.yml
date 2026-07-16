@@ -33,4 +33,3 @@ jobs:
         uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check licenses
-          command-arguments: --config .config/deny.toml
