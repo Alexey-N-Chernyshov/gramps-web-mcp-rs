@@ -64,6 +64,7 @@ impl TestFixture {
                 mcp_http_port: Default::default(),
                 mcp_auth_token: None,
                 mcp_allowed_hosts: None,
+                mcp_session_keep_alive_secs: None,
             },
             reqwest::Client::new(),
         );

@@ -70,7 +70,8 @@ async fn run_stdio(config: config::Config) -> Result<(), AppError> {
 async fn run_http(config: config::Config) -> Result<(), AppError> {
     use axum::http::Method;
     use rmcp::transport::streamable_http_server::{
-        session::local::LocalSessionManager, StreamableHttpServerConfig, StreamableHttpService,
+        session::local::LocalSessionManager,
+        StreamableHttpServerConfig, StreamableHttpService,
     };
     use tower_http::cors::CorsLayer;
 
@@ -79,6 +80,7 @@ async fn run_http(config: config::Config) -> Result<(), AppError> {
     let bind_addr = format!("{host}:{port}");
     let auth_token = config.mcp_auth_token.clone();
     let allowed_hosts_raw = config.mcp_allowed_hosts.clone();
+    let keep_alive = config.session_keep_alive();
 
     let mcp_server = server::GrampsMcpServer::new(config)?;
 
@@ -95,7 +97,20 @@ async fn run_http(config: config::Config) -> Result<(), AppError> {
         None => StreamableHttpServerConfig::default(),
     };
 
-    let session_manager = Arc::new(LocalSessionManager::default());
+    // Log keep-alive configuration
+    match keep_alive {
+        None => tracing::info!("HTTP session keep-alive disabled"),
+        Some(duration) => {
+            tracing::info!(
+                "HTTP session keep-alive: {} seconds",
+                duration.as_secs()
+            );
+        }
+    }
+
+    let mut session_manager = LocalSessionManager::default();
+    session_manager.session_config.keep_alive = keep_alive;
+    let session_manager = Arc::new(session_manager);
     let service =
         StreamableHttpService::new(move || Ok(mcp_server.clone()), session_manager, http_config);
 

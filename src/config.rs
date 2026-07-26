@@ -54,9 +54,19 @@ pub struct Config {
     pub mcp_auth_token: Option<String>,
     #[serde(default)]
     pub mcp_allowed_hosts: Option<String>,
+    #[serde(default)]
+    pub mcp_session_keep_alive_secs: Option<u64>,
 }
 
 impl Config {
+    pub fn session_keep_alive(&self) -> Option<std::time::Duration> {
+        match self.mcp_session_keep_alive_secs {
+            None => Some(std::time::Duration::from_secs(300)), // RMCP default
+            Some(0) => None,                                  // Disabled
+            Some(secs) => Some(std::time::Duration::from_secs(secs)),
+        }
+    }
+
     pub fn from_env() -> Result<Self> {
         let mut cfg = envy::from_env::<Config>()?;
         // Treat MCP_AUTH_TOKEN="" the same as unset
