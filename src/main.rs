@@ -80,7 +80,16 @@ async fn run_http(config: config::Config) -> Result<(), AppError> {
     let bind_addr = format!("{host}:{port}");
     let auth_token = config.mcp_auth_token.clone();
     let allowed_hosts_raw = config.mcp_allowed_hosts.clone();
-    let keep_alive = config.session_keep_alive();
+    let keep_alive = match config.mcp_keep_alive {
+        0 => {
+            tracing::info!("HTTP session keep-alive disabled");
+            None
+        }
+        secs => {
+            tracing::info!("HTTP session keep-alive: {} seconds", secs);
+            Some(std::time::Duration::from_secs(secs))
+        }
+    };
 
     let mcp_server = server::GrampsMcpServer::new(config)?;
 
@@ -97,20 +106,10 @@ async fn run_http(config: config::Config) -> Result<(), AppError> {
         None => StreamableHttpServerConfig::default(),
     };
 
-    // Log keep-alive configuration
-    match keep_alive {
-        None => tracing::info!("HTTP session keep-alive disabled"),
-        Some(duration) => {
-            tracing::info!(
-                "HTTP session keep-alive: {} seconds",
-                duration.as_secs()
-            );
-        }
-    }
-
     let mut session_manager = LocalSessionManager::default();
     session_manager.session_config.keep_alive = keep_alive;
     let session_manager = Arc::new(session_manager);
+
     let service =
         StreamableHttpService::new(move || Ok(mcp_server.clone()), session_manager, http_config);
 

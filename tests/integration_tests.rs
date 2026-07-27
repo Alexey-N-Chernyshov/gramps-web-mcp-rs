@@ -41,7 +41,7 @@ async fn auth_fails_with_wrong_password() {
             mcp_http_port: Default::default(),
             mcp_auth_token: None,
             mcp_allowed_hosts: None,
-            mcp_session_keep_alive_secs: None,
+            mcp_keep_alive: 300,
         },
         reqwest::Client::new(),
     );
