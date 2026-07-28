@@ -27,6 +27,7 @@ Choose a deployment mode based on where you run the MCP server:
 | `MCP_HTTP_PORT`     | `3000`    | Bind port in HTTP mode                                                                                                                                                                                                           |
 | `MCP_AUTH_TOKEN`    | —         | Bearer token protecting the `/mcp` endpoint in HTTP mode. If unset, no authentication is performed — only safe on a trusted LAN.                                                                                                 |
 | `MCP_ALLOWED_HOSTS` | —         | Comma-separated list of allowed `Host` header values for HTTP transport (DNS-rebinding protection). If unset, only `localhost`/`127.0.0.1`/`::1` are allowed (rmcp default). Example: `your-domain.com:8888,localhost,127.0.0.1` |
+| `MCP_KEEP_ALIVE`    | `300`     | MCP session keep-alive timeout in seconds. Set to `0` to disable session expiration. |
 
 ---
 

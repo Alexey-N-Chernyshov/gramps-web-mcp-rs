@@ -38,6 +38,10 @@ fn default_http_port() -> u16 {
     3000
 }
 
+fn default_mcp_keep_alive() -> u64 {
+    300
+}
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct Config {
     pub gramps_api_url: String,
@@ -54,6 +58,8 @@ pub struct Config {
     pub mcp_auth_token: Option<String>,
     #[serde(default)]
     pub mcp_allowed_hosts: Option<String>,
+    #[serde(default = "default_mcp_keep_alive")]
+    pub mcp_keep_alive: u64,
 }
 
 impl Config {
