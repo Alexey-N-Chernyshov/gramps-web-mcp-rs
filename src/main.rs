@@ -70,8 +70,7 @@ async fn run_stdio(config: config::Config) -> Result<(), AppError> {
 async fn run_http(config: config::Config) -> Result<(), AppError> {
     use axum::http::Method;
     use rmcp::transport::streamable_http_server::{
-        session::local::LocalSessionManager,
-        StreamableHttpServerConfig, StreamableHttpService,
+        session::local::LocalSessionManager, StreamableHttpServerConfig, StreamableHttpService,
     };
     use tower_http::cors::CorsLayer;
 
