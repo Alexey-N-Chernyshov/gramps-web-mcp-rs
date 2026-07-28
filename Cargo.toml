@@ -1,6 +1,6 @@
 [package]
 name = "gramps-web-mcp-rs"
-version = "1.0.1"
+version = "1.4.0"
 edition = "2021"
 description = "MCP server for Gramps Web genealogy API"
 license = "Apache-2.0"
