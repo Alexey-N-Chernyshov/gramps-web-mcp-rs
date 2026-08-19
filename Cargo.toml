@@ -51,5 +51,5 @@ codegen-units = 1
 
 [dev-dependencies]
 tokio-test = "0.4"
-testcontainers = { version = "0.27", features = ["http_wait"] }
+testcontainers = { version = "0.28", features = ["http_wait"] }
 serial_test = "4"
