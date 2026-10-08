@@ -122,9 +122,12 @@ impl GrampsMcpServer {
     // ── Search ──────────────────────────────────────────────────────────────
 
     #[tool(description = "\
-Full-text search across the genealogy database. \
-Set object_type to narrow results to a specific type, or omit to search across all types. \
-Use page/pagesize to paginate large result sets (default page=1, pagesize=20).")]
+Find genealogy records by name or keyword — this is the tool to use for \
+\"find a person\", \"look up a family\", \"search for a place\", etc. \
+Full-text search across the whole database. \
+Set `object_type` to narrow results to a specific type (a quoted string, e.g. \"person\"), \
+or omit to search across all types. \
+Use `page`/`pagesize` to paginate large result sets (default page=1, pagesize=20).")]
     async fn search(
         &self,
         Parameters(SearchInput {
@@ -159,11 +162,11 @@ Call this before writing an oql filter."
     }
 
     #[tool(description = "\
-Get genealogy objects. \
-`object_type` is always required (person, family, event, place, note, citation, source, media, repository, tag). \
-Provide `handle` for a single record, or `gramps_id` / `oql` / `page` / `pagesize` to browse a collection. \
-Use `oql` for structured filtering (call get_oql_reference for syntax). \
-For full-text search use the `search` tool instead.")]
+Get genealogy objects you can already identify — by `handle`, `gramps_id`, \
+or an `oql` filter — or browse a collection with `page`/`pagesize`. \
+`object_type` is always required, as a quoted string: \"person\", \"family\", \"event\", \"place\", \
+\"note\", \"citation\", \"source\", \"media\", \"repository\", or \"tag\". \
+Use `oql` for structured filtering (call get_oql_reference for syntax).")]
     async fn get_object(
         &self,
         Parameters(GetObjectInput {
@@ -178,7 +181,7 @@ For full-text search use the `search` tool instead.")]
         let Some(object_type) = object_type else {
             return Ok(CallToolResult::error(vec![ContentBlock::text(
                 "`object_type` is required. Specify one of: \
-                 person, family, event, place, note, citation, source, media, repository, tag",
+                 \"person\", \"family\", \"event\", \"place\", \"note\", \"citation\", \"source\", \"media\", \"repository\", \"tag\"",
             )]));
         };
         let result = if let Some(h) = handle {
@@ -674,7 +677,9 @@ For full-text search use the `search` tool instead.")]
 
     // ── Delete ──────────────────────────────────────────────────────────────
 
-    #[tool(description = "Delete an object by handle")]
+    #[tool(description = "\
+Delete an object by handle. `object_type` is required, as a quoted string: \
+\"person\", \"family\", \"event\", \"place\", \"note\", \"citation\", \"source\", \"media\", \"repository\", or \"tag\".")]
     async fn delete_object(
         &self,
         Parameters(DeleteObjectInput {
@@ -685,7 +690,7 @@ For full-text search use the `search` tool instead.")]
         let Some(object_type) = object_type else {
             return Ok(CallToolResult::error(vec![ContentBlock::text(
                 "`object_type` is required. Specify one of: \
-                 person, family, event, place, note, citation, source, media, repository, tag",
+                 \"person\", \"family\", \"event\", \"place\", \"note\", \"citation\", \"source\", \"media\", \"repository\", \"tag\"",
             )]));
         };
         delete::delete_object(&self.client, object_type.as_endpoint(), &handle)
