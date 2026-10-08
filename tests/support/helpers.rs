@@ -27,6 +27,9 @@ const TEST_PASS: &str = "Testpass1!";
 
 pub struct TestFixture {
     pub _compose: DockerCompose,
+    // Not every test binary that includes this file via `#[path]` needs the base URL —
+    // only the ones that build their own GrampsClient against it.
+    #[allow(dead_code)]
     pub base_url: String,
     pub client: GrampsClient,
 }
@@ -67,6 +70,7 @@ impl TestFixture {
                 mcp_auth_token: None,
                 mcp_allowed_hosts: None,
                 mcp_keep_alive: 300,
+                mcp_max_media_bytes: 50 * 1024 * 1024,
             },
             reqwest::Client::new(),
         );
@@ -77,6 +81,32 @@ impl TestFixture {
             client,
         }
     }
+}
+
+/// A client with arbitrary credentials/limits, for tests that only exercise pre-flight
+/// validation (size limits, MIME/checksum mismatches) and never need a real backend —
+/// `base_url` can safely point at an address nothing is listening on.
+///
+/// Only `media_binary_tests.rs` uses this today; other test binaries including this file
+/// via `#[path]` don't need it.
+#[allow(dead_code)]
+pub fn client_for_url(base_url: &str, max_media_bytes: u64) -> GrampsClient {
+    GrampsClient::new(
+        Config {
+            gramps_api_url: base_url.to_string(),
+            gramps_username: TEST_USER.to_string(),
+            gramps_password: TEST_PASS.to_string(),
+            gramps_readonly: false,
+            mcp_transport: Default::default(),
+            mcp_http_host: Default::default(),
+            mcp_http_port: Default::default(),
+            mcp_auth_token: None,
+            mcp_allowed_hosts: None,
+            mcp_keep_alive: 300,
+            mcp_max_media_bytes: max_media_bytes,
+        },
+        reqwest::Client::new(),
+    )
 }
 
 async fn register_admin(base_url: &str) {

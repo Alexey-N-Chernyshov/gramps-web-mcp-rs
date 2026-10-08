@@ -42,6 +42,10 @@ fn default_mcp_keep_alive() -> u64 {
     300
 }
 
+fn default_max_media_bytes() -> u64 {
+    50 * 1024 * 1024
+}
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct Config {
     pub gramps_api_url: String,
@@ -60,6 +64,8 @@ pub struct Config {
     pub mcp_allowed_hosts: Option<String>,
     #[serde(default = "default_mcp_keep_alive")]
     pub mcp_keep_alive: u64,
+    #[serde(default = "default_max_media_bytes")]
+    pub mcp_max_media_bytes: u64,
 }
 
 impl Config {
