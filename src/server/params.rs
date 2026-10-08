@@ -251,9 +251,42 @@ pub struct CreateMediaInput {
     /// use the URL that serves the raw bytes (Content-Type: image/... or similar),
     /// not a gallery or viewer page that returns HTML.
     pub url: Option<String>,
+    /// Base64-encoded file bytes. Use this to upload a file that exists only on the MCP
+    /// client's side — `path` only works for files already on the Gramps server, and `url`
+    /// requires the file to be reachable by the MCP server itself. Exactly one of `path`,
+    /// `url`, or `data_base64` must be provided.
+    pub data_base64: Option<String>,
     pub description: Option<String>,
-    /// MIME type, e.g. "image/jpeg". Detected automatically for URL downloads.
+    /// MIME type, e.g. "image/jpeg". Detected automatically for URL downloads and for
+    /// `data_base64` uploads (and cross-checked against the actual file content).
     pub mime: Option<String>,
+    /// Whether the media should be marked private. Only applies to `data_base64` uploads;
+    /// set at creation time so there is no window where the record is public.
+    pub is_private: Option<bool>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct GetMediaFileInput {
+    pub handle: String,
+    /// Maximum number of bytes to return. Must not exceed the server's configured media size
+    /// limit. Defaults to that server limit if omitted.
+    pub max_bytes: Option<u64>,
+    /// Must be explicitly set to true to read the bytes of media marked private.
+    pub allow_private: Option<bool>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ReplaceMediaFileInput {
+    /// Handle of the existing Media object whose binary file is being replaced.
+    pub handle: String,
+    /// Base64-encoded replacement file bytes.
+    pub data_base64: String,
+    /// MIME type of the replacement file. Cross-checked against the actual file content.
+    pub mime: Option<String>,
+    /// If given, the upload is rejected unless it matches the MD5 of `data_base64` exactly.
+    pub expected_md5: Option<String>,
+    /// If given, the upload is rejected unless it matches the SHA-256 of `data_base64` exactly.
+    pub expected_sha256: Option<String>,
 }
 
 #[cfg(test)]

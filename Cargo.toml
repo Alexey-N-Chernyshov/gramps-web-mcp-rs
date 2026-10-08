@@ -17,6 +17,9 @@ path = "src/main.rs"
 base64 = "0.23"
 chrono = { version = "0.4", features = ["serde"] }
 envy = "0.4"
+infer = "0.19"
+md-5 = "0.10"
+sha2 = "0.10"
 reqwest = { version = "0.13", features = [
     "json",
     "multipart",
@@ -43,6 +46,12 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 strum = { version = "0.28", features = ["derive"] }
 urlencoding = "2"
+
+[package.metadata.cargo-machete]
+# md-5 declares `[lib] name = "md5"`, so the crate is used as `md5::...` in source.
+# cargo-machete matches dependencies by package name (md-5 -> md_5) and doesn't see
+# the renamed lib, producing a false positive.
+ignored = ["md-5"]
 
 [profile.release]
 strip = true

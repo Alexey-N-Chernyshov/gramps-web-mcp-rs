@@ -180,7 +180,7 @@ pub async fn create_media_from_url(
     Ok(handle)
 }
 
-fn extract_handle(resp: serde_json::Value) -> Result<Handle> {
+pub(crate) fn extract_handle(resp: serde_json::Value) -> Result<Handle> {
     let obj = if let Some(arr) = resp.as_array() {
         // The newly created object has "old": null; updates have "old": {...}
         arr.iter()

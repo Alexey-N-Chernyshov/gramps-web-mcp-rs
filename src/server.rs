@@ -17,13 +17,15 @@ mod params;
 use crate::{
     client::GrampsClient,
     config::Config,
-    tools::{create, delete, get, merge, search, update},
+    tools::{create, delete, get, media, merge, search, update},
 };
+use base64::Engine as _;
 use params::{
     CreateCitationInput, CreateEventInput, CreateFamilyInput, CreateMediaInput, CreateNoteInput,
     CreatePersonInput, CreatePlaceInput, CreateRepositoryInput, CreateSourceInput, CreateTagInput,
-    DeleteObjectInput, GetObjectInput, HandleInput, HandlePairInput, MergeFamilyInput, MergeInput,
-    MergePersonInput, SearchInput, UpdateInput,
+    DeleteObjectInput, GetMediaFileInput, GetObjectInput, HandleInput, HandlePairInput,
+    MergeFamilyInput, MergeInput, MergePersonInput, ReplaceMediaFileInput, SearchInput,
+    UpdateInput,
 };
 use rmcp::{
     handler::server::{
@@ -84,6 +86,7 @@ const WRITE_TOOLS: &[&str] = &[
     "update_repository",
     "update_source",
     "update_tag",
+    "replace_media_file",
     "delete_object",
     "merge_citation",
     "merge_event",
@@ -479,47 +482,156 @@ Use `oql` for structured filtering (call get_oql_reference for syntax).")]
             })
     }
 
-    #[tool(
-        description = "Create a media record from a file already on the Gramps server (provide path) or by downloading from a URL (provide url)."
-    )]
+    #[tool(description = "\
+Create a media record from a file already on the Gramps server (provide path), \
+by downloading from a URL (provide url), or by uploading bytes from the MCP client \
+itself (provide data_base64 — the only option for a file that only exists in the \
+client's own workspace).")]
     async fn create_media(
         &self,
         Parameters(CreateMediaInput {
             path,
             url,
+            data_base64,
             description,
             mime,
+            is_private,
         }): Parameters<CreateMediaInput>,
     ) -> Result<CallToolResult, McpError> {
-        match (path.as_deref(), url.as_deref()) {
-            (_, Some(url)) => {
-                create::create_media_from_url(
+        match (path.as_deref(), url.as_deref(), data_base64.as_deref()) {
+            (_, _, Some(data_base64)) => {
+                let bytes = match base64::engine::general_purpose::STANDARD.decode(data_base64) {
+                    Ok(bytes) => bytes,
+                    Err(e) => {
+                        return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
+                            "data_base64 is not valid base64: {e}"
+                        ))]))
+                    }
+                };
+                media::create_media_from_bytes(
                     &self.client,
-                    url,
+                    bytes,
                     description.as_deref(),
                     mime.as_deref(),
+                    is_private,
                 )
                 .await
+                .map_or_else(api_err, |handle| {
+                    Ok(CallToolResult::success(vec![ContentBlock::text(format!(
+                        "Created media with handle: {handle}"
+                    ))]))
+                })
             }
-            (Some(path), None) => {
-                create::create_media_from_path(
-                    &self.client,
-                    path,
-                    description.as_deref(),
-                    mime.as_deref(),
-                )
-                .await
-            }
-            (None, None) => {
-                return Ok(CallToolResult::error(vec![ContentBlock::text(
-                    "Either path or url must be provided",
-                )]))
-            }
+            (_, Some(url), None) => create::create_media_from_url(
+                &self.client,
+                url,
+                description.as_deref(),
+                mime.as_deref(),
+            )
+            .await
+            .map_or_else(api_err, |handle| {
+                Ok(CallToolResult::success(vec![ContentBlock::text(format!(
+                    "Created media with handle: {handle}"
+                ))]))
+            }),
+            (Some(path), None, None) => create::create_media_from_path(
+                &self.client,
+                path,
+                description.as_deref(),
+                mime.as_deref(),
+            )
+            .await
+            .map_or_else(api_err, |handle| {
+                Ok(CallToolResult::success(vec![ContentBlock::text(format!(
+                    "Created media with handle: {handle}"
+                ))]))
+            }),
+            (None, None, None) => Ok(CallToolResult::error(vec![ContentBlock::text(
+                "Exactly one of path, url, or data_base64 must be provided",
+            )])),
         }
-        .map_or_else(api_err, |handle| {
-            Ok(CallToolResult::success(vec![ContentBlock::text(format!(
-                "Created media with handle: {handle}"
-            ))]))
+    }
+
+    #[tool(description = "\
+Read back the binary content of a media object, size-limited, with MD5 and SHA-256 \
+for verifying it against a local original. Private media is refused unless \
+allow_private is explicitly set.")]
+    async fn get_media_file(
+        &self,
+        Parameters(GetMediaFileInput {
+            handle,
+            max_bytes,
+            allow_private,
+        }): Parameters<GetMediaFileInput>,
+    ) -> Result<CallToolResult, McpError> {
+        media::get_media_file(
+            &self.client,
+            &handle,
+            max_bytes,
+            allow_private.unwrap_or(false),
+        )
+        .await
+        .map_or_else(api_err, |file| {
+            let summary = serde_json::json!({
+                "handle": handle,
+                "mime": file.mime,
+                "size_bytes": file.size_bytes,
+                "md5": file.md5,
+                "sha256": file.sha256,
+            });
+            let blob = base64::engine::general_purpose::STANDARD.encode(&file.bytes);
+            Ok(CallToolResult::success(vec![
+                ContentBlock::text(summary.to_string()),
+                ContentBlock::resource(
+                    ResourceContents::blob(blob, format!("gramps://media/{handle}/file"))
+                        .with_mime_type(file.mime.clone()),
+                ),
+            ]))
+        })
+    }
+
+    #[tool(description = "\
+Replace the binary file of an existing Media object in place, preserving its handle, \
+ID, privacy, description and all references to it. The declared mime (if any) is \
+cross-checked against the file's actual content.")]
+    async fn replace_media_file(
+        &self,
+        Parameters(ReplaceMediaFileInput {
+            handle,
+            data_base64,
+            mime,
+            expected_md5,
+            expected_sha256,
+        }): Parameters<ReplaceMediaFileInput>,
+    ) -> Result<CallToolResult, McpError> {
+        let bytes = match base64::engine::general_purpose::STANDARD.decode(&data_base64) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
+                    "data_base64 is not valid base64: {e}"
+                ))]))
+            }
+        };
+        media::replace_media_file(
+            &self.client,
+            &handle,
+            bytes,
+            mime.as_deref(),
+            expected_md5.as_deref(),
+            expected_sha256.as_deref(),
+        )
+        .await
+        .map_or_else(api_err, |summary| {
+            Ok(CallToolResult::success(vec![ContentBlock::text(
+                serde_json::json!({
+                    "handle": handle,
+                    "mime": summary.mime,
+                    "size_bytes": summary.size_bytes,
+                    "md5": summary.md5,
+                    "sha256": summary.sha256,
+                })
+                .to_string(),
+            )]))
         })
     }
 
@@ -705,9 +817,9 @@ Delete an object by handle. `object_type` is required, as a quoted string: \
 
     // ── Merge ───────────────────────────────────────────────────────────────
 
-    #[tool(
-        description = "Merge two people: survivor_handle is kept, duplicate_handle is deleted. Set family_merger=true (default) to also merge their families."
-    )]
+    #[tool(description = "\
+Merge two people: survivor_handle is kept, duplicate_handle is deleted. \
+Set family_merger=true (default) to also merge their families.")]
     async fn merge_person(
         &self,
         Parameters(MergePersonInput {
@@ -730,9 +842,9 @@ Delete an object by handle. `object_type` is required, as a quoted string: \
         })
     }
 
-    #[tool(
-        description = "Merge two families: survivor_handle is kept, duplicate_handle is deleted. Optionally specify which father/mother handle to keep."
-    )]
+    #[tool(description = "\
+Merge two families: survivor_handle is kept, duplicate_handle is deleted. \
+Optionally specify which father/mother handle to keep.")]
     async fn merge_family(
         &self,
         Parameters(MergeFamilyInput {
