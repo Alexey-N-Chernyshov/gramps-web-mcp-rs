@@ -24,8 +24,8 @@ use params::{
     CreateCitationInput, CreateEventInput, CreateFamilyInput, CreateMediaInput, CreateNoteInput,
     CreatePersonInput, CreatePlaceInput, CreateRepositoryInput, CreateSourceInput, CreateTagInput,
     DeleteObjectInput, GetMediaFileInput, GetObjectInput, HandleInput, HandlePairInput,
-    MergeFamilyInput, MergeInput, MergePersonInput, QueryObjectInput, ReplaceMediaFileInput,
-    SearchInput, UpdateInput,
+    MergeFamilyInput, MergeInput, MergePersonInput, ObjectTypeInput, QueryObjectInput,
+    ReplaceMediaFileInput, SearchInput, UpdateInput,
 };
 use rmcp::{
     handler::server::{
@@ -154,29 +154,53 @@ Use `page`/`pagesize` to paginate large result sets (default page=1, pagesize=20
     // ── Get ─────────────────────────────────────────────────────────────────
 
     #[tool(
-        description = "Get the OQL (Object Query Language) reference: operators, \
-helper methods, and query examples by object type. \
-Call this before writing an oql filter."
+        description = "Get the native Gramps filter rule reference for get_object's \
+`rules` field: the generic {function, invert, rules} shape, the recommended `MatchesQuery` \
+(GOQL) rule, and how to discover the full rule catalog via get_filter_rules. \
+Call this before writing a `rules` filter."
     )]
-    async fn get_oql_reference(&self) -> Result<CallToolResult, McpError> {
+    async fn get_rules_reference(&self) -> Result<CallToolResult, McpError> {
         Ok(CallToolResult::success(vec![ContentBlock::text(
-            OQL_REFERENCE,
+            RULES_REFERENCE,
         )]))
     }
 
     #[tool(description = "\
+Get the live catalog of native Gramps filter rules for one object type — name, \
+description, and parameter types for every rule usable in get_object's `rules` field \
+(including `MatchesQuery`, a GOQL expression). Call this when get_rules_reference's \
+MatchesQuery/GOQL isn't expressive enough and you need a rule from Gramps' own catalog \
+(e.g. date-range or relationship rules). `object_type` is required, as a quoted string: \
+\"person\", \"family\", \"event\", \"place\", \"note\", \"citation\", \"source\", \"media\", \
+or \"repository\" (not \"tag\" — it has no rule catalog upstream).")]
+    async fn get_filter_rules(
+        &self,
+        Parameters(ObjectTypeInput { object_type }): Parameters<ObjectTypeInput>,
+    ) -> Result<CallToolResult, McpError> {
+        let Some(object_type) = object_type else {
+            return Ok(CallToolResult::error(vec![ContentBlock::text(
+                "`object_type` is required. Specify one of: \
+                 \"person\", \"family\", \"event\", \"place\", \"note\", \"citation\", \"source\", \"media\", \"repository\"",
+            )]));
+        };
+        get::get_filter_rules(&self.client, object_type.as_endpoint())
+            .await
+            .map_or_else(api_err, ok_json)
+    }
+
+    #[tool(description = "\
 Get genealogy objects you can already identify — by `handle`, `gramps_id`, \
-or an `oql` filter — or browse a collection with `page`/`pagesize`. \
+or a `rules` filter — or browse a collection with `page`/`pagesize`. \
 `object_type` is always required, as a quoted string: \"person\", \"family\", \"event\", \"place\", \
 \"note\", \"citation\", \"source\", \"media\", \"repository\", or \"tag\". \
-Use `oql` for structured filtering (call get_oql_reference for syntax).")]
+Use `rules` for structured filtering (call get_rules_reference for syntax).")]
     async fn get_object(
         &self,
         Parameters(GetObjectInput {
             object_type,
             handle,
             gramps_id,
-            oql,
+            rules,
             page,
             pagesize,
         }): Parameters<GetObjectInput>,
@@ -189,12 +213,12 @@ Use `oql` for structured filtering (call get_oql_reference for syntax).")]
         };
         let result = if let Some(h) = handle {
             get::get_object_by_handle(&self.client, object_type.as_endpoint(), &h).await
-        } else if gramps_id.is_some() || oql.is_some() || page.is_some() || pagesize.is_some() {
+        } else if gramps_id.is_some() || rules.is_some() || page.is_some() || pagesize.is_some() {
             get::get_object_collection(
                 &self.client,
                 object_type.as_endpoint(),
                 gramps_id.as_deref(),
-                oql.as_deref(),
+                rules.as_ref(),
                 page,
                 pagesize,
             )
@@ -202,7 +226,7 @@ Use `oql` for structured filtering (call get_oql_reference for syntax).")]
         } else {
             return Ok(CallToolResult::error(vec![ContentBlock::text(
                 "Provide `handle` for a single object, \
-                 or `gramps_id` / `oql` / `page` / `pagesize` to browse a collection.",
+                 or `gramps_id` / `rules` / `page` / `pagesize` to browse a collection.",
             )]));
         };
         result.map_or_else(api_err, ok_json)
@@ -221,12 +245,13 @@ Call this before writing a where_expr."
 
     #[tool(description = "\
 Fast structured query — filter/sort/page a collection of one object type via a SQL-compiled \
-backend (POST .../query/), far faster than get_object's `oql` on large trees. \
-`object_type` is required, as a quoted string: \"person\", \"family\", \"event\", \"place\", \
-\"note\", \"citation\", \"source\", \"media\", \"repository\", or \"tag\". \
-Use `where_expr` for column-based filtering (call get_goql_reference for syntax) — it \
-cannot call Gramps object methods like oql can; fall back to get_object + oql for that. \
-Use `after` (from a previous response's `next_after`) to page past `limit` rows.")]
+backend (POST .../query/). `where_expr` is the same GOQL language as get_object's \
+`rules: {\"name\": \"MatchesQuery\", ...}`, but this tool also gives you `select` (pick \
+columns), `order_by`, and efficient `after`-cursor pagination (from the previous response's \
+`next_after`) instead of page/pagesize. `object_type` is required, as a quoted string: \
+\"person\", \"family\", \"event\", \"place\", \"note\", \"citation\", \"source\", \"media\", \
+\"repository\", or \"tag\". Call get_goql_reference for `where_expr` syntax; fall back to \
+get_object + `rules` when you need to combine multiple native Gramps rules.")]
     async fn query_object(
         &self,
         Parameters(QueryObjectInput {
@@ -1078,10 +1103,6 @@ impl ServerHandler for GrampsMcpServer {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListResourcesResult, McpError> {
-        let oql_resource = Resource::new("gramps://oql-reference", "oql-reference")
-            .with_title("OQL Reference")
-            .with_description("Object Query Language syntax, operators and helper method reference")
-            .with_mime_type("text/markdown");
         let goql_resource = Resource::new("gramps://goql-reference", "goql-reference")
             .with_title("GOQL Reference")
             .with_description(
@@ -1089,8 +1110,15 @@ impl ServerHandler for GrampsMcpServer {
                  full query body (select/order_by/limit/after/count)",
             )
             .with_mime_type("text/markdown");
+        let rules_resource = Resource::new("gramps://rules-reference", "rules-reference")
+            .with_title("Rules Reference")
+            .with_description(
+                "Native Gramps filter rule syntax for get_object's `rules` field, including \
+                 the recommended MatchesQuery (GOQL) rule",
+            )
+            .with_mime_type("text/markdown");
         Ok(ListResourcesResult {
-            resources: vec![oql_resource, goql_resource],
+            resources: vec![goql_resource, rules_resource],
             meta: None,
             next_cursor: None,
         })
@@ -1101,16 +1129,16 @@ impl ServerHandler for GrampsMcpServer {
         request: ReadResourceRequestParams,
         _context: RequestContext<RoleServer>,
     ) -> Result<ReadResourceResult, McpError> {
-        if request.uri == "gramps://oql-reference" {
-            return Ok(ReadResourceResult::new(vec![ResourceContents::text(
-                OQL_REFERENCE,
-                "gramps://oql-reference",
-            )]));
-        }
         if request.uri == "gramps://goql-reference" {
             return Ok(ReadResourceResult::new(vec![ResourceContents::text(
                 GOQL_REFERENCE,
                 "gramps://goql-reference",
+            )]));
+        }
+        if request.uri == "gramps://rules-reference" {
+            return Ok(ReadResourceResult::new(vec![ResourceContents::text(
+                RULES_REFERENCE,
+                "gramps://rules-reference",
             )]));
         }
         Err(McpError::resource_not_found(
@@ -1182,8 +1210,8 @@ impl ServerHandler for GrampsMcpServer {
     }
 }
 
-const OQL_REFERENCE: &str = include_str!("resources/oql_reference.md");
 const GOQL_REFERENCE: &str = include_str!("resources/goql_reference.md");
+const RULES_REFERENCE: &str = include_str!("resources/rules_reference.md");
 
 // See the WORKAROUND comment on list_tools above.
 fn fix_schema(v: &mut serde_json::Value) {

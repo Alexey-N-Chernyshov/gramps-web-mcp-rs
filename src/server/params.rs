@@ -110,8 +110,13 @@ pub struct GetObjectInput {
     pub handle: Option<String>,
     /// Filter by Gramps ID (e.g. "I0001") — returns a collection.
     pub gramps_id: Option<String>,
-    /// OQL filter expression (call get_oql_reference for full syntax).
-    pub oql: Option<String>,
+    /// Native Gramps filter rule expression — returns a collection. Simplest form wraps a
+    /// GOQL expression: {"rules": [{"name": "MatchesQuery", "values": ["<goql expr>"]}]}
+    /// (call get_goql_reference for GOQL syntax). For the full native rule catalog call
+    /// get_filter_rules. Full shape: {"function": "and"|"or"|"one", "invert": bool,
+    /// "rules": [{"name": str, "values": [...], "regex": bool}]}.
+    #[schemars(schema_with = "json_object_schema")]
+    pub rules: Option<serde_json::Value>,
     /// Page number (1-based) for paginated collection results.
     pub page: Option<u32>,
     /// Results per page for collection results (default 20).
@@ -134,7 +139,7 @@ pub struct QueryObjectInput {
     pub select: Option<Vec<String>>,
     /// "Almost Python" filter expression, e.g.
     /// `gender == 1 and primary_name.surname_list[0].surname == "Smith"`.
-    /// Call get_query_reference for the full grammar. Leave empty to match everything.
+    /// Call get_goql_reference for the full grammar. Leave empty to match everything.
     pub where_expr: Option<String>,
     /// Sort order, applied in list order.
     pub order_by: Option<Vec<OrderBySpec>>,
@@ -144,6 +149,13 @@ pub struct QueryObjectInput {
     pub after: Option<String>,
     /// Include a total row count (adds `total_count` to the response). Slightly slower.
     pub count: Option<bool>,
+}
+
+#[derive(Deserialize, JsonSchema, Debug)]
+pub struct ObjectTypeInput {
+    /// Required. A quoted string, one of: "person", "family", "event", "place", "note", "citation", "source", "media", "repository".
+    #[schemars(required)]
+    pub object_type: Option<ObjectType>,
 }
 
 #[derive(Deserialize, JsonSchema)]

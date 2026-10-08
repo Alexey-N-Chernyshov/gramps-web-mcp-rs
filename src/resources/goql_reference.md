@@ -1,99 +1,110 @@
 # GOQL — Gramps Object Query Language Reference
 
-Used by the `query_object` tool's `where_expr` parameter.
+Used by `query_object`'s `where_expr`, and recommended as the `values` of a `MatchesQuery`
+rule in `get_object`'s `rules` (see `get_rules_reference`) — same expression language
+either way.
 
 ## Overview
 
-GOQL is a structured, column-based filter expression that compiles to SQL server-side
-(`POST /api/<type>/query/`), used by `query_object`. It is **not** the same language as
-`oql` (used by `get_object`'s `oql` parameter): GOQL only compares raw Gramps data fields —
-it cannot call object methods (no `sa.spouse()`, no `len()`, no `any()`/`all()`). Use
-`query_object` + `where_expr` for simple column filters on large trees (much faster); fall
-back to `get_object` + `oql` when you need to call a method or walk a computed relationship
-`oql` supports but GOQL doesn't.
-
-GOQL operates on the same raw Gramps JSON shape as `oql`'s property access, so
-`type.string` is empty for built-in enum types — use `type.value = <integer>` instead (see
-the EventType table below).
-
-## Syntax
-
-`property operator value` — combined with `and`, `or`, `not`, and parentheses.
-String values **must be quoted** with double quotes.
+GOQL is an "almost Python" expression language that compiles to SQL server-side. Write it
+like a real Python boolean expression — comparisons, `and`/`or`/`not`, even comprehensions
+for relationship checks — and it is parsed as pure syntax (never executed), then translated
+into SQL. It is dramatically faster than browsing a full collection client-side, but it only
+understands paths, comparisons, and the specific relationship/collection names below — not
+arbitrary Gramps object methods.
 
 ## Operators
 
 | Operator | Meaning |
 |----------|---------|
 | `==` `!=` | Equality / inequality |
-| `<` `<=` `>` `>=` | Comparison (strings and numbers) |
-| `like` | SQL-style pattern match (`%` wildcard) |
-| `regex` | Regular-expression match |
-| `contains` | Substring / membership test |
-| `in` | Membership in a list |
-| `and` `or` `not` | Boolean combinators |
+| `<` `<=` `>` `>=` | Comparison |
+| `is` `is not` | Sugar for `==`/`!=` (value equality, not identity) |
+| `in` / `not in` | Membership: `path in [v1, v2, ...]` |
+| `"substring" in path` | Substring test — same `in`, disambiguated by a string literal on the left |
+| `like(path, 'pattern%')` | SQL-style pattern match — a function call, not an infix operator |
+| `regex(path, 'pattern')` | Regular-expression match — also a function call |
+| `and` `or` `not` | Boolean combinators, standard Python precedence (`not` > `and` > `or`) |
 
-## Column paths
+Either side of `==`/`!=`/`<`/`<=`/`>`/`>=` may be the path — `5 < gender` and `gender > 5`
+mean the same thing.
 
-Dot notation addresses nested fields; `[N]` indexes into an array; a path segment that
-names a relationship (e.g. `father`, `mother`) dereferences across objects:
+## Paths
 
+A path is a bare identifier optionally followed by `.attr` / `[index]` segments:
+
+- `gender`, `gramps_id`, `private`
 - `primary_name.surname_list[0].surname`
-- `father.primary_name.surname_list[0].surname`
-- `gramps_id`, `handle`, `private`, `gender` (0=unknown 1=male 2=female)
+- Crosses a relationship by name (see table below): `father.surname`, `birth.place.title`
 
-## Type fields (`type.value`)
+## Relationships (single-hop, usable anywhere in a path)
 
-**Common EventType integers:**
+| From | Name | To |
+|------|------|----|
+| Person | `birth`, `death` | Event |
+| Family | `father`, `mother` | Person |
+| Event | `place` | Place |
+| Citation | `source` | Source |
+| Place | `enclosed_by` | Place (self) |
 
-| Value | Type |
-|-------|------|
-| 1 | Marriage |
-| 7 | Divorce |
-| 11 | Adopted |
-| 12 | Birth |
-| 13 | Death |
-| 15 | Baptism |
-| 19 | Burial |
-| 21 | Census |
-| 22 | Christening |
-| 28 | Emigration |
-| 30 | Immigration |
-| 37 | Occupation |
-| 42 | Residence |
-| 44 | Will |
+## Collections (one-to-many — only as the target of `exists`/`any`/`count`, never in a dotted path)
 
-> To find a value for an unlisted type: fetch any event of that type and read `type.value`.
+| Type | Collections |
+|------|-------------|
+| Person | `families`, `parent_families`, `child_refs`, `associations`, `events`, `notes`, `citations`, `media`, `tags` |
+| Family | `children`, `events`, `notes`, `citations`, `media`, `tags` |
+| Event | `notes`, `citations`, `media`, `tags` |
+| Place | `enclosing_places`, `notes`, `citations`, `media`, `tags` |
+| Source | `repositories`, `notes`, `media`, `tags` |
+| Citation | `notes`, `media`, `tags` |
+| Repository | `notes`, `tags` |
+| Media | `notes`, `citations`, `tags` |
+| Note | `tags` |
+| every type | `backlinks` — objects referring to this one |
 
-## Object types
+## Checking collections: `exists`, `any`, `count`
 
-`person`, `family`, `event`, `place`, `citation`, `source`, `repository`, `media`, `note`, `tag`
+- `exists(children)` — at least one related row at all.
+- `exists(children, given_name == "Steve")` — condition evaluated against the *related*
+  type directly, no loop-variable prefix.
+- `any(children, given_name == "Steve")` — identical to `exists` for a collection name.
+- `any(media_list)` — one argument that is **not** a collection name: "this array has at
+  least one element", equivalent to `len(media_list) > 0`.
+- `count(children)` / `count(children, given_name == "Steve")` — number of (matching)
+  related rows; compare it like any number: `count(children) > 2`.
+- **Comprehension sugar** (preferred — reads like real Python): `any(cond for x in rel if
+  ...)` desugars to `exists(rel, cond)`; `len([... for x in rel if ...])` desugars to
+  `count(rel, cond)`. The loop variable is stripped, so write the condition as if it were
+  already evaluated against the related row: `any(x.given_name == "Steve" for x in
+  children)` → condition is just `given_name == "Steve"`.
 
-## Common properties by type
+## Type constants — `ClassName.CONST`
 
-**person** — `gramps_id`, `gender`, `private`, `primary_name.first_name`,
-`primary_name.surname_list[0].surname`, `birth_ref_index`, `death_ref_index`
+Instead of magic integers, compare against the real Gramps class constant; it resolves to
+the same value `gender == 1` would, but is self-documenting:
 
-**family** — `gramps_id`, `father_handle`, `mother_handle`, `child_ref_list`
+```
+gender == Person.MALE
+type.value == EventType.BIRTH
+date.modifier == Date.MOD_ABOUT
+```
 
-**event** — `gramps_id`, `type.value`, `description`, `date.dateval[2]` (year),
-`date.sortval`
+Available classes: `Person`, `Citation`, `Note`, `Date`, `AttributeType`, `ChildRefType`,
+`EventRoleType`, `EventType`, `FamilyRelType`, `MarkerType`, `NameOriginType`, `NameType`,
+`NoteType`, `PlaceType`, `RepositoryType`, `SourceMediaType`, `SrcAttributeType`,
+`StyledTextTagType`, `UrlType`. Each exposes its ALL_CAPS members (`Person.MALE`,
+`Person.FEMALE`, `EventType.BIRTH`, `EventType.DEATH`, `EventType.MARRIAGE`, ...).
 
-**place** — `gramps_id`, `title`, `name.value`, `place_type.value`, `lat`, `long`
+## Dates — `Date('...')`
 
-**note** — `gramps_id`, `type.value`, `text.string`, `private`
+Parses a human date string into a comparable integer (Julian day number), so it works with
+ordinary comparisons:
 
-**source** — `gramps_id`, `title`, `author`, `pubinfo`, `abbrev`
+```
+birth.date.sortval >= Date('Jan 1, 1968')
+```
 
-**citation** — `gramps_id`, `page`, `confidence`, `source_handle`
-
-**media** — `gramps_id`, `path`, `mime`, `desc`
-
-**repository** — `gramps_id`, `name`, `type.value`
-
-**tag** — `name`, `color`, `priority`
-
-## Beyond `where_expr`: the rest of the query body
+## Beyond `where_expr`: the rest of the `query_object` body
 
 `query_object` also accepts:
 
@@ -109,20 +120,27 @@ names a relationship (e.g. `father`, `mother`) dereferences across objects:
 ## Examples
 
 ```
-# Surname equals "Ivanov"
-primary_name.surname_list[0].surname == "Ivanov"
+# Surname equals "Smith"
+primary_name.surname_list[0].surname == "Smith"
 
-# First name starts with a Cyrillic prefix
-primary_name.first_name contains "Ив"
+# First name contains a Cyrillic prefix
+"Ив" in primary_name.first_name
+
+# Male persons born after 1900
+gender == Person.MALE and birth.date.sortval >= Date('Jan 1, 1900')
+
+# People with at least one child named Steve
+any(given_name == "Steve" for x in children)
+# equivalently: exists(children, given_name == "Steve")
+
+# Families with more than 3 children
+count(children) > 3
 
 # All Birth events
-type.value == 12
+type.value == EventType.BIRTH
 
-# Death events after year 1900 with exact date
-type.value == 13 and date.dateval[2] > 1900
-
-# Private notes mentioning "David"
-private == true and text.string contains "David"
+# Private notes mentioning "David" (pattern match)
+private == True and like(text.string, '%David%')
 
 # Father's surname is "Smith"
 father.primary_name.surname_list[0].surname == "Smith"
