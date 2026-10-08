@@ -101,6 +101,34 @@ impl GrampsClient {
         self.parse(resp).await
     }
 
+    /// POST /api/{path} with a JSON body; if the response carries `X-Total-Count`, merge it
+    /// into the returned object as `"total_count"`.
+    pub async fn post_with_count(
+        &self,
+        path: &str,
+        body: &serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        tracing::debug!("POST {path}");
+        let token = self.bearer().await?;
+        let resp = self
+            .http
+            .post(self.url(path))
+            .header("Authorization", format!("Bearer {token}"))
+            .json(body)
+            .send()
+            .await?;
+        let total_count = resp
+            .headers()
+            .get("X-Total-Count")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.parse::<u64>().ok());
+        let mut value: serde_json::Value = self.parse(resp).await?;
+        if let (Some(tc), Some(obj)) = (total_count, value.as_object_mut()) {
+            obj.insert("total_count".into(), serde_json::json!(tc));
+        }
+        Ok(value)
+    }
+
     /// PUT /api/{path} with a JSON body.
     pub async fn put<B: serde::Serialize, T: DeserializeOwned>(
         &self,

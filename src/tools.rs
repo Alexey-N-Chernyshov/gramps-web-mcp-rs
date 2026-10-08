@@ -17,5 +17,6 @@ pub mod delete;
 pub mod get;
 pub mod media;
 pub mod merge;
+pub mod query;
 pub mod search;
 pub mod update;

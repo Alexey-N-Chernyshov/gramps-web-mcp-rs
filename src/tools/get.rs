@@ -15,6 +15,14 @@
 use crate::client::{GrampsClient, Result};
 use urlencoding;
 
+/// Returns the live catalog of native Gramps filter rules (and saved custom filters) for
+/// one object type (`GET /api/filters/{endpoint}/`): name, description, labels and
+/// parameter types for every rule usable in `get_object`'s `rules` field, including
+/// `MatchesQuery` (a GOQL expression). Tag has no rule catalog of its own upstream.
+pub async fn get_filter_rules(client: &GrampsClient, endpoint: &str) -> Result<serde_json::Value> {
+    client.get(&format!("/api/filters/{endpoint}")).await
+}
+
 pub async fn get_relations(
     client: &GrampsClient,
     handle1: &str,
@@ -62,7 +70,7 @@ pub async fn get_object_collection(
     client: &GrampsClient,
     endpoint: &str,
     gramps_id: Option<&str>,
-    oql: Option<&str>,
+    rules: Option<&serde_json::Value>,
     page: Option<u32>,
     pagesize: Option<u32>,
 ) -> Result<serde_json::Value> {
@@ -70,8 +78,9 @@ pub async fn get_object_collection(
     if let Some(id) = gramps_id {
         params.push(format!("gramps_id={}", urlencoding::encode(id)));
     }
-    if let Some(q) = oql {
-        params.push(format!("oql={}", urlencoding::encode(q)));
+    if let Some(r) = rules {
+        let encoded = serde_json::to_string(r).unwrap_or_default();
+        params.push(format!("rules={}", urlencoding::encode(&encoded)));
     }
     if let Some(p) = page {
         params.push(format!("page={p}"));
