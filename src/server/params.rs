@@ -118,6 +118,34 @@ pub struct GetObjectInput {
     pub pagesize: Option<u32>,
 }
 
+#[derive(Deserialize, JsonSchema, Debug)]
+pub struct OrderBySpec {
+    pub column: String,
+    /// "asc" or "desc". Defaults to "asc".
+    pub direction: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema, Debug)]
+pub struct QueryObjectInput {
+    /// Required. A quoted string, one of: "person", "family", "event", "place", "note", "citation", "source", "media", "repository", "tag".
+    #[schemars(required)]
+    pub object_type: Option<ObjectType>,
+    /// Columns to return. Omit to return all columns.
+    pub select: Option<Vec<String>>,
+    /// "Almost Python" filter expression, e.g.
+    /// `gender == 1 and primary_name.surname_list[0].surname == "Smith"`.
+    /// Call get_query_reference for the full grammar. Leave empty to match everything.
+    pub where_expr: Option<String>,
+    /// Sort order, applied in list order.
+    pub order_by: Option<Vec<OrderBySpec>>,
+    /// Max rows to return (1-1000, default 50).
+    pub limit: Option<u32>,
+    /// Cursor from a previous response's `next_after`, for paging past `limit` rows.
+    pub after: Option<String>,
+    /// Include a total row count (adds `total_count` to the response). Slightly slower.
+    pub count: Option<bool>,
+}
+
 #[derive(Deserialize, JsonSchema)]
 pub struct HandleInput {
     pub handle: String,

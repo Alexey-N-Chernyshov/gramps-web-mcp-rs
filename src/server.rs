@@ -17,15 +17,15 @@ mod params;
 use crate::{
     client::GrampsClient,
     config::Config,
-    tools::{create, delete, get, media, merge, search, update},
+    tools::{create, delete, get, media, merge, query, search, update},
 };
 use base64::Engine as _;
 use params::{
     CreateCitationInput, CreateEventInput, CreateFamilyInput, CreateMediaInput, CreateNoteInput,
     CreatePersonInput, CreatePlaceInput, CreateRepositoryInput, CreateSourceInput, CreateTagInput,
     DeleteObjectInput, GetMediaFileInput, GetObjectInput, HandleInput, HandlePairInput,
-    MergeFamilyInput, MergeInput, MergePersonInput, ReplaceMediaFileInput, SearchInput,
-    UpdateInput,
+    MergeFamilyInput, MergeInput, MergePersonInput, QueryObjectInput, ReplaceMediaFileInput,
+    SearchInput, UpdateInput,
 };
 use rmcp::{
     handler::server::{
@@ -206,6 +206,68 @@ Use `oql` for structured filtering (call get_oql_reference for syntax).")]
             )]));
         };
         result.map_or_else(api_err, ok_json)
+    }
+
+    #[tool(
+        description = "Get the GOQL (Gramps Object Query Language) reference: syntax, \
+operators, column paths, and the full query_object body (select/order_by/limit/after/count). \
+Call this before writing a where_expr."
+    )]
+    async fn get_goql_reference(&self) -> Result<CallToolResult, McpError> {
+        Ok(CallToolResult::success(vec![ContentBlock::text(
+            GOQL_REFERENCE,
+        )]))
+    }
+
+    #[tool(description = "\
+Fast structured query — filter/sort/page a collection of one object type via a SQL-compiled \
+backend (POST .../query/), far faster than get_object's `oql` on large trees. \
+`object_type` is required, as a quoted string: \"person\", \"family\", \"event\", \"place\", \
+\"note\", \"citation\", \"source\", \"media\", \"repository\", or \"tag\". \
+Use `where_expr` for column-based filtering (call get_goql_reference for syntax) — it \
+cannot call Gramps object methods like oql can; fall back to get_object + oql for that. \
+Use `after` (from a previous response's `next_after`) to page past `limit` rows.")]
+    async fn query_object(
+        &self,
+        Parameters(QueryObjectInput {
+            object_type,
+            select,
+            where_expr,
+            order_by,
+            limit,
+            after,
+            count,
+        }): Parameters<QueryObjectInput>,
+    ) -> Result<CallToolResult, McpError> {
+        let Some(object_type) = object_type else {
+            return Ok(CallToolResult::error(vec![ContentBlock::text(
+                "`object_type` is required. Specify one of: \
+                 \"person\", \"family\", \"event\", \"place\", \"note\", \"citation\", \"source\", \"media\", \"repository\", \"tag\"",
+            )]));
+        };
+        let order_by = order_by.map(|specs| {
+            specs
+                .into_iter()
+                .map(|s| {
+                    serde_json::json!({
+                        "column": s.column,
+                        "direction": s.direction.unwrap_or_else(|| "asc".into()),
+                    })
+                })
+                .collect::<Vec<_>>()
+        });
+        query::query_object(
+            &self.client,
+            object_type.as_endpoint(),
+            select,
+            where_expr,
+            order_by,
+            limit,
+            after,
+            count,
+        )
+        .await
+        .map_or_else(api_err, ok_json)
     }
 
     #[tool(description = "Get the most direct relationship path between two people")]
@@ -1016,12 +1078,19 @@ impl ServerHandler for GrampsMcpServer {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListResourcesResult, McpError> {
-        let resource = Resource::new("gramps://oql-reference", "oql-reference")
+        let oql_resource = Resource::new("gramps://oql-reference", "oql-reference")
             .with_title("OQL Reference")
             .with_description("Object Query Language syntax, operators and helper method reference")
             .with_mime_type("text/markdown");
+        let goql_resource = Resource::new("gramps://goql-reference", "goql-reference")
+            .with_title("GOQL Reference")
+            .with_description(
+                "Gramps Object Query Language syntax for query_object's where_expr, plus the \
+                 full query body (select/order_by/limit/after/count)",
+            )
+            .with_mime_type("text/markdown");
         Ok(ListResourcesResult {
-            resources: vec![resource],
+            resources: vec![oql_resource, goql_resource],
             meta: None,
             next_cursor: None,
         })
@@ -1036,6 +1105,12 @@ impl ServerHandler for GrampsMcpServer {
             return Ok(ReadResourceResult::new(vec![ResourceContents::text(
                 OQL_REFERENCE,
                 "gramps://oql-reference",
+            )]));
+        }
+        if request.uri == "gramps://goql-reference" {
+            return Ok(ReadResourceResult::new(vec![ResourceContents::text(
+                GOQL_REFERENCE,
+                "gramps://goql-reference",
             )]));
         }
         Err(McpError::resource_not_found(
@@ -1108,6 +1183,7 @@ impl ServerHandler for GrampsMcpServer {
 }
 
 const OQL_REFERENCE: &str = include_str!("resources/oql_reference.md");
+const GOQL_REFERENCE: &str = include_str!("resources/goql_reference.md");
 
 // See the WORKAROUND comment on list_tools above.
 fn fix_schema(v: &mut serde_json::Value) {
