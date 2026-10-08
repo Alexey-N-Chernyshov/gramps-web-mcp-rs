@@ -266,8 +266,12 @@ async fn search_pagination() {
     delete::delete_object(client, "people", &h2).await.unwrap();
 }
 
+fn matches_query_rule(goql_expr: &str) -> serde_json::Value {
+    serde_json::json!({"rules": [{"name": "MatchesQuery", "values": [goql_expr]}]})
+}
+
 #[tokio::test]
-async fn oql_filter_people_by_gramps_id() {
+async fn rules_filter_people_by_gramps_id() {
     let fixture = common::TestFixture::new().await;
     let client = &fixture.client;
 
@@ -280,25 +284,28 @@ async fn oql_filter_people_by_gramps_id() {
         .unwrap();
     let gramps_id = obj["gramps_id"].as_str().expect("gramps_id missing");
 
-    let query = format!(r#"person.gramps_id == "{gramps_id}""#);
-    let result = get::get_object_collection(client, "people", None, Some(&query), None, None)
+    let rules = matches_query_rule(&format!(r#"gramps_id == "{gramps_id}""#));
+    let result = get::get_object_collection(client, "people", None, Some(&rules), None, None)
         .await
         .unwrap();
 
-    assert!(result.is_array(), "oql filter should return an array");
+    assert!(result.is_array(), "rules filter should return an array");
     let items = result.as_array().unwrap();
     assert!(
         items
             .iter()
             .any(|p| p["handle"].as_str() == Some(handle.as_str())),
-        "oql filter should find the created person"
+        "rules filter should find the created person"
     );
 
-    // oql and pagesize work together
-    let paged = get::get_object_collection(client, "people", None, Some(&query), Some(1), Some(1))
+    // rules and pagesize work together
+    let paged = get::get_object_collection(client, "people", None, Some(&rules), Some(1), Some(1))
         .await
         .unwrap();
-    assert!(paged.is_array(), "oql + pagesize=1 should return an array");
+    assert!(
+        paged.is_array(),
+        "rules + pagesize=1 should return an array"
+    );
     assert!(
         paged.as_array().unwrap().len() <= 1,
         "pagesize=1 should cap results"
@@ -310,7 +317,7 @@ async fn oql_filter_people_by_gramps_id() {
 }
 
 #[tokio::test]
-async fn oql_filter_families_by_child_count() {
+async fn rules_filter_families_by_child_count() {
     let fixture = common::TestFixture::new().await;
     let client = &fixture.client;
 
@@ -332,18 +339,12 @@ async fn oql_filter_families_by_child_count() {
     .await
     .unwrap();
 
-    let result = get::get_object_collection(
-        client,
-        "families",
-        None,
-        Some("len(family.get_child_ref_list()) > 0"),
-        None,
-        None,
-    )
-    .await
-    .unwrap();
+    let rules = matches_query_rule("count(children) > 0");
+    let result = get::get_object_collection(client, "families", None, Some(&rules), None, None)
+        .await
+        .unwrap();
 
-    assert!(result.is_array(), "oql filter should return an array");
+    assert!(result.is_array(), "rules filter should return an array");
     let items = result.as_array().unwrap();
     assert!(
         items
@@ -367,4 +368,22 @@ async fn oql_filter_families_by_child_count() {
     delete::delete_object(client, "people", &child)
         .await
         .unwrap();
+}
+
+#[tokio::test]
+async fn get_filter_rules_lists_matches_query() {
+    let fixture = common::TestFixture::new().await;
+    let client = &fixture.client;
+
+    let result = get::get_filter_rules(client, "people").await.unwrap();
+
+    let rules = result["rules"]
+        .as_array()
+        .expect("response should have a `rules` array");
+    assert!(
+        rules
+            .iter()
+            .any(|r| r["rule"].as_str() == Some("MatchesQuery")),
+        "person rule catalog should include MatchesQuery"
+    );
 }
