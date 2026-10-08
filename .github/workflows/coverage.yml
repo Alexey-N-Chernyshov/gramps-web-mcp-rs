@@ -10,7 +10,7 @@ env:
   RUSTFLAGS: -D warnings
 
 jobs:
-  coverage:
+  coverage-matrix:
     name: Coverage (${{ matrix.name }})
     runs-on: ubuntu-latest
     strategy:
@@ -55,3 +55,19 @@ jobs:
           flags: ${{ matrix.name }}
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: ${{ github.event.pull_request.head.repo.fork != true }}
+
+  # Required-status-check aggregator: branch protection targets this stable
+  # job name instead of the per-matrix-leg names above, which change
+  # whenever a test file is added/removed/renamed.
+  coverage:
+    name: Coverage
+    needs: coverage-matrix
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check matrix result
+        run: |
+          if [ "${{ needs.coverage-matrix.result }}" != "success" ]; then
+            echo "One or more coverage matrix legs failed"
+            exit 1
+          fi
