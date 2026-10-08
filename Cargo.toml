@@ -1,6 +1,6 @@
 [package]
 name = "gramps-web-mcp-rs"
-version = "1.4.0"
+version = "1.5.0"
 edition = "2021"
 description = "MCP server for Gramps Web genealogy API"
 license = "Apache-2.0"
@@ -17,9 +17,9 @@ path = "src/main.rs"
 base64 = "0.23"
 chrono = { version = "0.4", features = ["serde"] }
 envy = "0.4"
-infer = "0.19"
-md-5 = "0.10"
-sha2 = "0.10"
+infer = "0.22"
+md-5 = "0.11"
+sha2 = "0.11"
 reqwest = { version = "0.13", features = [
     "json",
     "multipart",
@@ -60,5 +60,8 @@ codegen-units = 1
 
 [dev-dependencies]
 tokio-test = "0.4"
-testcontainers = { version = "0.28", features = ["http_wait", "docker-compose"] }
+testcontainers = { version = "0.28", features = [
+    "http_wait",
+    "docker-compose",
+] }
 serial_test = "4"
