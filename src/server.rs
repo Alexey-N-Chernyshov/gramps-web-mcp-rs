@@ -33,9 +33,10 @@ use rmcp::{
         wrapper::Parameters,
     },
     model::{
-        CallToolRequestParams, CallToolResult, ContentBlock, ErrorCode, Implementation,
-        ListResourcesResult, ListToolsResult, PaginatedRequestParams, ReadResourceRequestParams,
-        ReadResourceResult, Resource, ResourceContents, ServerCapabilities, ServerInfo,
+        CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, ErrorCode,
+        Implementation, ListResourcesResult, ListToolsResult, PaginatedRequestParams,
+        ReadResourceRequestParams, ReadResourceResponse, ReadResourceResult, Resource,
+        ResourceContents, ServerCapabilities, ServerConfig,
     },
     service::RequestContext,
     tool, tool_handler, tool_router, ErrorData as McpError, RoleServer, ServerHandler,
@@ -1084,8 +1085,8 @@ Optionally specify which father/mother handle to keep.")]
 
 #[tool_handler]
 impl ServerHandler for GrampsMcpServer {
-    fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::new(
             ServerCapabilities::builder()
                 .enable_tools()
                 .enable_resources()
@@ -1117,29 +1118,30 @@ impl ServerHandler for GrampsMcpServer {
                  the recommended MatchesQuery (GOQL) rule",
             )
             .with_mime_type("text/markdown");
-        Ok(ListResourcesResult {
-            resources: vec![goql_resource, rules_resource],
-            meta: None,
-            next_cursor: None,
-        })
+        Ok(ListResourcesResult::with_all_items(vec![
+            goql_resource,
+            rules_resource,
+        ]))
     }
 
     async fn read_resource(
         &self,
         request: ReadResourceRequestParams,
         _context: RequestContext<RoleServer>,
-    ) -> Result<ReadResourceResult, McpError> {
+    ) -> Result<ReadResourceResponse, McpError> {
         if request.uri == "gramps://goql-reference" {
             return Ok(ReadResourceResult::new(vec![ResourceContents::text(
                 GOQL_REFERENCE,
                 "gramps://goql-reference",
-            )]));
+            )])
+            .into());
         }
         if request.uri == "gramps://rules-reference" {
             return Ok(ReadResourceResult::new(vec![ResourceContents::text(
                 RULES_REFERENCE,
                 "gramps://rules-reference",
-            )]));
+            )])
+            .into());
         }
         Err(McpError::resource_not_found(
             format!("Unknown resource: {}", request.uri),
@@ -1182,18 +1184,14 @@ impl ServerHandler for GrampsMcpServer {
                 tool
             })
             .collect();
-        Ok(ListToolsResult {
-            tools,
-            meta: None,
-            next_cursor: None,
-        })
+        Ok(ListToolsResult::with_all_items(tools))
     }
 
     async fn call_tool(
         &self,
         request: CallToolRequestParams,
         context: RequestContext<RoleServer>,
-    ) -> Result<CallToolResult, McpError> {
+    ) -> Result<CallToolResponse, McpError> {
         match self
             .tools
             .call(ToolCallContext::new(self, request, context))
@@ -1203,7 +1201,8 @@ impl ServerHandler for GrampsMcpServer {
                 Ok(CallToolResult::error(vec![ContentBlock::text(format!(
                     "Invalid parameters: {}",
                     e.message
-                ))]))
+                ))])
+                .into())
             }
             other => other,
         }
