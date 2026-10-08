@@ -32,7 +32,7 @@ pub enum ObjectType {
 }
 
 const VALID_OBJECT_TYPES: &str =
-    "person, family, event, place, note, citation, source, media, repository, tag";
+    "\"person\", \"family\", \"event\", \"place\", \"note\", \"citation\", \"source\", \"media\", \"repository\", \"tag\"";
 
 impl<'de> serde::Deserialize<'de> for ObjectType {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
@@ -93,7 +93,7 @@ impl ObjectType {
 #[derive(Deserialize, JsonSchema)]
 pub struct SearchInput {
     pub query: String,
-    /// Narrow search to a specific object type. Omit to search all types.
+    /// Narrow search to a specific object type, as a quoted string (e.g. "person", "family", "place"). Omit to search all types.
     pub object_type: Option<ObjectType>,
     /// Page number (1-based). Defaults to 1.
     pub page: Option<u32>,
@@ -103,7 +103,7 @@ pub struct SearchInput {
 
 #[derive(Deserialize, JsonSchema, Debug)]
 pub struct GetObjectInput {
-    /// Required. One of: person, family, event, place, note, citation, source, media, repository, tag.
+    /// Required. A quoted string, one of: "person", "family", "event", "place", "note", "citation", "source", "media", "repository", "tag".
     #[schemars(required)]
     pub object_type: Option<ObjectType>,
     /// Handle of a specific object — returns a single record.
@@ -125,6 +125,7 @@ pub struct HandleInput {
 
 #[derive(Deserialize, JsonSchema)]
 pub struct DeleteObjectInput {
+    /// Required. A quoted string, one of: "person", "family", "event", "place", "note", "citation", "source", "media", "repository", "tag".
     #[schemars(required)]
     pub object_type: Option<ObjectType>,
     pub handle: String,
