@@ -317,6 +317,57 @@ async fn rules_filter_people_by_gramps_id() {
 }
 
 #[tokio::test]
+async fn rules_filter_pagesize_without_page_still_caps_results() {
+    let fixture = common::TestFixture::new().await;
+    let client = &fixture.client;
+
+    // Each person heads their own family (count(families) > 0) and has no parent
+    // family (not exists(parent_families)) — more matches than the pagesize below.
+    let mut people = Vec::new();
+    let mut families = Vec::new();
+    for _ in 0..4 {
+        let person = create::create_person(client, CreatePersonRequest::default())
+            .await
+            .unwrap();
+        let family = create::create_family(
+            client,
+            CreateFamilyRequest {
+                father_handle: Some(person.clone()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        people.push(person);
+        families.push(family);
+    }
+
+    let rules = matches_query_rule("count(families) > 0 and not exists(parent_families)");
+
+    // Gramps Web defaults `page` to 0 when omitted, which disables pagination and
+    // silently ignores `pagesize` — pagesize alone, with no page, must still cap.
+    let paged = get::get_object_collection(client, "people", None, Some(&rules), None, Some(2))
+        .await
+        .unwrap();
+    assert!(
+        paged.as_array().unwrap().len() <= 2,
+        "pagesize=2 without page should still cap results, got {}",
+        paged
+    );
+
+    for family in families {
+        delete::delete_object(client, "families", &family)
+            .await
+            .unwrap();
+    }
+    for person in people {
+        delete::delete_object(client, "people", &person)
+            .await
+            .unwrap();
+    }
+}
+
+#[tokio::test]
 async fn rules_filter_families_by_child_count() {
     let fixture = common::TestFixture::new().await;
     let client = &fixture.client;
