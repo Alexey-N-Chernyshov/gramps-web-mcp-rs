@@ -28,6 +28,8 @@ pub enum Error {
     Http(#[from] reqwest::Error),
     #[error("parse error: {0}")]
     Parse(String),
+    #[error("invalid input: {0}")]
+    Validation(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -38,6 +40,7 @@ pub struct GrampsClient {
     base_url: String,
     http: reqwest::Client,
     auth: AuthManager,
+    max_media_bytes: u64,
 }
 
 impl GrampsClient {
@@ -47,11 +50,16 @@ impl GrampsClient {
             base_url: config.gramps_api_url.trim_end_matches('/').to_string(),
             http,
             auth,
+            max_media_bytes: config.mcp_max_media_bytes,
         }
     }
 
     pub fn http_client(&self) -> &reqwest::Client {
         &self.http
+    }
+
+    pub fn max_media_bytes(&self) -> u64 {
+        self.max_media_bytes
     }
 
     fn url(&self, path: &str) -> String {
@@ -129,6 +137,64 @@ impl GrampsClient {
             .send()
             .await?;
         self.parse(resp).await
+    }
+
+    /// PUT /api/{path} with raw bytes and explicit Content-Type, return deserialised response.
+    ///
+    /// `if_match` sets the `If-Match` header, for optimistic concurrency against an etag
+    /// (Gramps media uses the current checksum as its etag).
+    pub async fn put_bytes<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        bytes: Vec<u8>,
+        content_type: &str,
+        if_match: Option<&str>,
+    ) -> Result<T> {
+        tracing::debug!("PUT {path} (bytes, content-type={content_type})");
+        let token = self.bearer().await?;
+        let mut req = self
+            .http
+            .put(self.url(path))
+            .header("Authorization", format!("Bearer {token}"))
+            .header("Content-Type", content_type);
+        if let Some(etag) = if_match {
+            req = req.header("If-Match", format!("\"{etag}\""));
+        }
+        let resp = req.body(bytes).send().await?;
+        self.parse(resp).await
+    }
+
+    /// GET /api/{path} and return the raw response body bytes plus its Content-Type header,
+    /// without attempting JSON decoding.
+    pub async fn get_bytes(&self, path: &str) -> Result<(Vec<u8>, Option<String>)> {
+        tracing::debug!("GET {path} (bytes)");
+        let token = self.bearer().await?;
+        let resp = self
+            .http
+            .get(self.url(path))
+            .header("Authorization", format!("Bearer {token}"))
+            .send()
+            .await?;
+        let status = resp.status();
+        if status == reqwest::StatusCode::NOT_FOUND {
+            tracing::debug!(path = resp.url().path(), "not found");
+            return Err(Error::NotFound(resp.url().path().to_string()));
+        }
+        let content_type = resp
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.split(';').next().unwrap_or(s).trim().to_string());
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            tracing::warn!(status = status.as_u16(), %body, "API error response");
+            return Err(Error::Api {
+                status: status.as_u16(),
+                body,
+            });
+        }
+        let bytes = resp.bytes().await?;
+        Ok((bytes.to_vec(), content_type))
     }
 
     /// DELETE /api/{path}, expects no response body.
