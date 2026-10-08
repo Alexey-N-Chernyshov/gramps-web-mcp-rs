@@ -10,8 +10,8 @@ env:
   RUSTFLAGS: -D warnings
 
 jobs:
-  coverage:
-    name: Coverage
+  coverage-warmup:
+    name: Warm coverage build cache
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -19,14 +19,77 @@ jobs:
         with:
           components: llvm-tools-preview
       - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: coverage
       - uses: taiki-e/install-action@cargo-llvm-cov
 
-      - name: Run coverage (unit + integration)
-        run: cargo llvm-cov --lcov --output-path lcov.info
+      - name: Pre-build lib + all test binaries under coverage instrumentation
+        run: |
+          eval "$(cargo llvm-cov show-env --export-prefix)"
+          export CARGO_TARGET_DIR="$CARGO_LLVM_COV_TARGET_DIR/llvm-cov-target"
+          cargo build --tests
+
+  coverage-matrix:
+    name: Coverage (${{ matrix.name }})
+    needs: coverage-warmup
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: unit
+            args: --lib --bins
+          - name: client_tests
+            args: --test client_tests
+          - name: event_place_tests
+            args: --test event_place_tests
+          - name: media_binary_tests
+            args: --test media_binary_tests
+          - name: media_tests
+            args: --test media_tests
+          - name: merge_tests
+            args: --test merge_tests
+          - name: person_family_tests
+            args: --test person_family_tests
+          - name: query_tests
+            args: --test query_tests
+          - name: reference_tests
+            args: --test reference_tests
+          - name: search_rules_tests
+            args: --test search_rules_tests
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: coverage
+      - uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Run coverage (${{ matrix.name }})
+        run: cargo llvm-cov ${{ matrix.args }} --lcov --output-path lcov.info
 
       - name: Upload to Codecov
         uses: codecov/codecov-action@v7
         with:
           files: lcov.info
+          flags: ${{ matrix.name }}
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: ${{ github.event.pull_request.head.repo.fork != true }}
+
+  # Required-status-check aggregator: branch protection targets this stable
+  # job name instead of the per-matrix-leg names above, which change
+  # whenever a test file is added/removed/renamed.
+  coverage:
+    name: Coverage
+    needs: coverage-matrix
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check matrix result
+        run: |
+          if [ "${{ needs.coverage-matrix.result }}" != "success" ]; then
+            echo "One or more coverage matrix legs failed"
+            exit 1
+          fi
