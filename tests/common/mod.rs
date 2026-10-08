@@ -15,40 +15,42 @@
 use gramps_web_mcp_rs::{client::GrampsClient, config::Config};
 use std::time::Duration;
 use testcontainers::{
+    compose::DockerCompose,
     core::{wait::HttpWaitStrategy, IntoContainerPort, WaitFor},
-    runners::AsyncRunner,
-    ContainerAsync, GenericImage, ImageExt,
 };
 
-const IMAGE: &str = "ghcr.io/gramps-project/grampsweb";
-const TAG: &str = "latest";
+const COMPOSE_FILE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/docker-compose.test.yml");
+const SERVICE: &str = "grampsweb-test";
 const PORT: u16 = 5000;
 pub const TEST_USER: &str = "testadmin";
 const TEST_PASS: &str = "Testpass1!";
 
 pub struct TestFixture {
-    pub _container: ContainerAsync<GenericImage>,
+    pub _compose: DockerCompose,
     pub base_url: String,
     pub client: GrampsClient,
 }
 
 impl TestFixture {
     pub async fn new() -> Self {
-        let container: ContainerAsync<GenericImage> = GenericImage::new(IMAGE, TAG)
-            .with_exposed_port(PORT.tcp())
-            .with_wait_for(WaitFor::http(
+        let mut compose = DockerCompose::with_local_client(&[COMPOSE_FILE]).with_wait_for_service(
+            SERVICE,
+            WaitFor::http(
                 HttpWaitStrategy::new("/api/metadata/")
                     .with_port(PORT.tcp())
                     .with_response_matcher(|_| true),
-            ))
-            .with_env_var("GRAMPSWEB_TREE", "testdb")
-            .with_env_var("GRAMPSWEB_SECRET_KEY", "integration-test-secret")
-            .with_startup_timeout(Duration::from_secs(240))
-            .start()
-            .await
-            .expect("failed to start Gramps Web container");
+            ),
+        );
 
-        let port = container.get_host_port_ipv4(PORT).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(240), compose.up())
+            .await
+            .expect("timed out waiting for the Gramps Web compose stack to start")
+            .expect("failed to start the Gramps Web compose stack");
+
+        let service = compose
+            .service(SERVICE)
+            .expect("grampsweb-test service should be running");
+        let port = service.get_host_port_ipv4(PORT).await.unwrap();
         let base_url = format!("http://localhost:{port}");
 
         register_admin(&base_url).await;
@@ -70,7 +72,7 @@ impl TestFixture {
         );
 
         Self {
-            _container: container,
+            _compose: compose,
             base_url,
             client,
         }
