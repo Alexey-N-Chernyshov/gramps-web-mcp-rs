@@ -47,6 +47,12 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 strum = { version = "0.28", features = ["derive"] }
 urlencoding = "2"
 
+[package.metadata.cargo-machete]
+# md-5 declares `[lib] name = "md5"`, so the crate is used as `md5::...` in source.
+# cargo-machete matches dependencies by package name (md-5 -> md_5) and doesn't see
+# the renamed lib, producing a false positive.
+ignored = ["md-5"]
+
 [profile.release]
 strip = true
 lto = true
