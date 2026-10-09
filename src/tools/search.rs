@@ -25,6 +25,10 @@ pub async fn search(
     if let Some(t) = object_type {
         params.push(format!("type={}", urlencoding::encode(t)));
     }
+    // Gramps Web defaults `page` to 0, which disables pagination entirely and
+    // makes it silently ignore `pagesize`. If the caller wants a capped page but
+    // didn't say which one, assume the first.
+    let page = page.or(pagesize.is_some().then_some(1));
     if let Some(p) = page {
         params.push(format!("page={p}"));
     }
