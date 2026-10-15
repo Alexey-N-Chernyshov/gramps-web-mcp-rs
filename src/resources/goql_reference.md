@@ -29,6 +29,9 @@ arbitrary Gramps object methods.
 Either side of `==`/`!=`/`<`/`<=`/`>`/`>=` may be the path — `5 < gender` and `gender > 5`
 mean the same thing.
 
+`in`/`like` are **case-sensitive**: `"ivan" in primary_name.first_name` will not match
+"Ivan". For case-insensitive matching, use `regex('(?i)pattern')` instead.
+
 ## Paths
 
 A path is a bare identifier optionally followed by `.attr` / `[index]` segments:
@@ -46,6 +49,10 @@ A path is a bare identifier optionally followed by `.attr` / `[index]` segments:
 | Event | `place` | Place |
 | Citation | `source` | Source |
 | Place | `enclosed_by` | Place (self) |
+
+`enclosed_by` picks just one parent place, even if a place has had several over time — it
+is not date-aware. To check against any of them, use `enclosing_places` (below) with
+`exists`/`any`; it can't be `select`ed, only tested.
 
 ## Collections (one-to-many — only as the target of `exists`/`any`/`count`, never in a dotted path)
 
@@ -77,6 +84,11 @@ A path is a bare identifier optionally followed by `.attr` / `[index]` segments:
   `count(rel, cond)`. The loop variable is stripped, so write the condition as if it were
   already evaluated against the related row: `any(x.given_name == "Steve" for x in
   children)` → condition is just `given_name == "Steve"`.
+- Don't compare `exists(...)`/`any(...)` to a boolean literal — `exists(backlinks) ==
+  False` is rejected (with an error that confusingly talks about `count(...)`, not
+  `exists`). Negate with `not` instead: `not exists(backlinks)`.
+- `count(...)` works in `where_expr`/`select` but not `order_by` ("invalid path segment")
+  — you can't sort by an aggregate in one `query_object` call.
 
 ## Type constants — `ClassName.CONST`
 
@@ -95,6 +107,10 @@ Available classes: `Person`, `Citation`, `Note`, `Date`, `AttributeType`, `Child
 `StyledTextTagType`, `UrlType`. Each exposes its ALL_CAPS members (`Person.MALE`,
 `Person.FEMALE`, `EventType.BIRTH`, `EventType.DEATH`, `EventType.MARRIAGE`, ...).
 
+For a standard type, `type.string` is empty and `type.value` is a bare integer (e.g. `13`
+for `EventType.DEATH`) — nothing selectable names it; compare `type.value` to the
+constants above instead.
+
 ## Dates — `Date('...')`
 
 Parses a human date string into a comparable integer (Julian day number), so it works with
@@ -104,12 +120,17 @@ ordinary comparisons:
 birth.date.sortval >= Date('Jan 1, 1968')
 ```
 
+Queryable/selectable date fields are `sortval` (comparable Julian day number) and `text`
+(display string) — not `year`/`month`/`day`, even though those appear in `get_object`'s
+full response; `birth.date.year` in `select` fails with a 422.
+
 ## Beyond `where_expr`: the rest of the `query_object` body
 
 `query_object` also accepts:
 
 - `select` — list of column paths to return; omit to return every column.
-- `order_by` — list of `{column, direction}` ("asc"/"desc"), applied in order.
+- `order_by` — list of `{column, direction}` ("asc"/"desc"), applied in order. Plain
+  column paths only — `count(...)` and other aggregates are rejected here (see above).
 - `limit` — max rows per call (1-1000, default 50).
 - `after` — opaque cursor from the previous response's `next_after`, for paging past
   `limit` rows. This is keyset pagination, not an offset/page number — always pass back
