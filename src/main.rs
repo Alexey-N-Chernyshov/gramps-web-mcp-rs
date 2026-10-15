@@ -17,6 +17,7 @@ mod auth;
 mod client;
 mod config;
 mod models;
+mod oauth;
 mod server;
 mod tools;
 
@@ -25,6 +26,7 @@ use std::sync::Arc;
 use app_error::AppError;
 use config::TransportMode;
 use rmcp::{transport::io::stdio, ServiceExt};
+use secrecy::ExposeSecret;
 
 #[tokio::main]
 async fn main() -> Result<(), AppError> {
@@ -79,6 +81,12 @@ async fn run_http(config: config::Config) -> Result<(), AppError> {
     let bind_addr = format!("{host}:{port}");
     let auth_token = config.mcp_auth_token.clone();
     let allowed_hosts_raw = config.mcp_allowed_hosts.clone();
+    let oauth_enabled = config.mcp_oauth_enabled;
+    let oauth_storage_path = config.mcp_oauth_storage_path.clone();
+    let oauth_storage_key = config.mcp_oauth_storage_key.clone();
+    let oauth_public_url = config.mcp_oauth_public_url.clone();
+    let gramps_api_url = config.gramps_api_url.clone();
+    let max_media_bytes = config.mcp_max_media_bytes;
     let keep_alive = match config.mcp_keep_alive {
         0 => {
             tracing::info!("HTTP session keep-alive disabled");
@@ -103,7 +111,11 @@ async fn run_http(config: config::Config) -> Result<(), AppError> {
             }
         }
         None => StreamableHttpServerConfig::default(),
-    };
+    }
+    // Plain JSON responses instead of chunked SSE for simple request/response
+    // calls — some reverse proxies (and flaky tunnels) mishandle chunked
+    // text/event-stream bodies.
+    .with_json_response(true);
 
     let mut session_manager = LocalSessionManager::default();
     session_manager.session_config.keep_alive = keep_alive;
@@ -117,25 +129,53 @@ async fn run_http(config: config::Config) -> Result<(), AppError> {
         .allow_headers(tower_http::cors::Any)
         .allow_origin(tower_http::cors::Any);
 
-    let mcp_router = match auth_token {
-        Some(token) => {
-            tracing::info!("HTTP auth enabled");
-            axum::Router::new()
-                .nest_service("/mcp", service)
-                .route_layer(axum::middleware::from_fn_with_state(
-                    token,
-                    bearer_auth_middleware,
-                ))
-        }
-        None => {
-            tracing::warn!("HTTP auth disabled — set MCP_AUTH_TOKEN for public deployments");
-            axum::Router::new().nest_service("/mcp", service)
+    let mcp_router = if oauth_enabled {
+        tracing::info!("OAuth mode enabled — per-user Gramps identity on every request");
+        let store = oauth::Store::open(
+            oauth_storage_path,
+            oauth_storage_key
+                .as_ref()
+                .expect("validated non-empty by Config::from_env when OAuth is enabled")
+                .expose_secret(),
+        )
+        .await?;
+        let oauth_state = Arc::new(oauth::OAuthState {
+            store,
+            api_url: gramps_api_url,
+            http: reqwest::Client::new(),
+            issuer: oauth_public_url
+                .expect("validated non-empty by Config::from_env when OAuth is enabled"),
+            max_media_bytes,
+        });
+        axum::Router::new()
+            .nest_service("/mcp", service)
+            .route_layer(axum::middleware::from_fn_with_state(
+                oauth_state.clone(),
+                oauth::identity_middleware,
+            ))
+            .merge(oauth::router(oauth_state))
+    } else {
+        match auth_token {
+            Some(token) => {
+                tracing::info!("HTTP auth enabled");
+                axum::Router::new()
+                    .nest_service("/mcp", service)
+                    .route_layer(axum::middleware::from_fn_with_state(
+                        token,
+                        bearer_auth_middleware,
+                    ))
+            }
+            None => {
+                tracing::warn!("HTTP auth disabled — set MCP_AUTH_TOKEN for public deployments");
+                axum::Router::new().nest_service("/mcp", service)
+            }
         }
     };
 
     let app = mcp_router
         .route("/health", axum::routing::get(|| async { "ok" }))
-        .layer(cors);
+        .layer(cors)
+        .layer(tower_http::trace::TraceLayer::new_for_http());
 
     let listener = tokio::net::TcpListener::bind(&bind_addr).await?;
 
@@ -147,14 +187,14 @@ async fn run_http(config: config::Config) -> Result<(), AppError> {
 }
 
 async fn bearer_auth_middleware(
-    axum::extract::State(token): axum::extract::State<String>,
+    axum::extract::State(token): axum::extract::State<secrecy::SecretString>,
     req: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> axum::response::Response {
     use axum::http::StatusCode;
     use axum::response::IntoResponse;
 
-    let expected = format!("Bearer {token}");
+    let expected = format!("Bearer {}", token.expose_secret());
     let authorized = req
         .headers()
         .get(axum::http::header::AUTHORIZATION)

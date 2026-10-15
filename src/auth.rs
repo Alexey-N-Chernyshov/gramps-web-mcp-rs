@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use async_trait::async_trait;
 use base64::Engine as _;
+use secrecy::{ExposeSecret, SecretString};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-
-use crate::config::Config;
+use url::Url;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -30,60 +31,57 @@ pub enum Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// Supplies a valid Gramps Web Bearer token for `GrampsClient` to use on every
+/// request. `AuthManager` (this file) authenticates once with a fixed
+/// username/password; `oauth::OAuthSession` (OAuth mode) resolves the token
+/// for whichever user is attached to the current request instead.
+#[async_trait]
+pub trait TokenSource: Send + Sync {
+    async fn get_token(&self) -> Result<String>;
+}
+
 #[derive(Debug, Clone)]
 struct Token {
     value: String,
     expires_at: chrono::DateTime<chrono::Utc>,
 }
 
-/// Manages Gramps Web JWT tokens with automatic refresh.
+/// Manages a single Gramps Web JWT (one fixed username/password) with automatic refresh.
 #[derive(Clone)]
 pub struct AuthManager {
-    config: Config,
+    api_url: Url,
+    username: String,
+    password: SecretString,
     client: reqwest::Client,
     token: Arc<Mutex<Option<Token>>>,
 }
 
 impl AuthManager {
-    pub fn new(config: Config, client: reqwest::Client) -> Self {
+    pub fn new(
+        api_url: Url,
+        username: String,
+        password: SecretString,
+        client: reqwest::Client,
+    ) -> Self {
         Self {
-            config,
+            api_url,
+            username,
+            password,
             client,
             token: Arc::new(Mutex::new(None)),
         }
     }
 
-    /// Returns a valid Bearer token, refreshing if expired.
-    pub async fn get_token(&self) -> Result<String> {
-        let mut guard = self.token.lock().await;
-
-        if let Some(ref t) = *guard {
-            if chrono::Utc::now() < t.expires_at - chrono::Duration::seconds(30) {
-                tracing::trace!("using cached JWT token");
-                return Ok(t.value.clone());
-            }
-        }
-
-        tracing::debug!("JWT token expired or missing, refreshing");
-        let token = self.fetch_token().await?;
-        let value = token.value.clone();
-        *guard = Some(token);
-        Ok(value)
-    }
-
     async fn fetch_token(&self) -> Result<Token> {
-        let url = format!(
-            "{}/api/token/",
-            self.config.gramps_api_url.trim_end_matches('/')
-        );
+        let url = format!("{}/api/token/", self.api_url.as_str().trim_end_matches('/'));
 
         tracing::debug!("fetching JWT token from {url}");
         let resp = self
             .client
             .post(&url)
             .json(&serde_json::json!({
-                "username": self.config.gramps_username,
-                "password": self.config.gramps_password,
+                "username": self.username,
+                "password": self.password.expose_secret(),
             }))
             .send()
             .await?;
@@ -116,8 +114,29 @@ impl AuthManager {
     }
 }
 
+#[async_trait]
+impl TokenSource for AuthManager {
+    /// Returns a valid Bearer token, refreshing if expired.
+    async fn get_token(&self) -> Result<String> {
+        let mut guard = self.token.lock().await;
+
+        if let Some(ref t) = *guard {
+            if chrono::Utc::now() < t.expires_at - chrono::Duration::seconds(30) {
+                tracing::trace!("using cached JWT token");
+                return Ok(t.value.clone());
+            }
+        }
+
+        tracing::debug!("JWT token expired or missing, refreshing");
+        let token = self.fetch_token().await?;
+        let value = token.value.clone();
+        *guard = Some(token);
+        Ok(value)
+    }
+}
+
 /// Decode the `exp` claim from a JWT payload.
-fn decode_exp(token: &str) -> chrono::DateTime<chrono::Utc> {
+pub(crate) fn decode_exp(token: &str) -> chrono::DateTime<chrono::Utc> {
     decode_exp_inner(token).unwrap_or_else(|| chrono::Utc::now() + chrono::Duration::minutes(15))
 }
 

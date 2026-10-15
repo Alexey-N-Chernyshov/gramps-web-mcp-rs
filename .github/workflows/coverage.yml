@@ -49,6 +49,8 @@ jobs:
             args: --test media_tests
           - name: merge_tests
             args: --test merge_tests
+          - name: oauth_tests
+            args: --test oauth_tests
           - name: person_family_tests
             args: --test person_family_tests
           - name: query_tests

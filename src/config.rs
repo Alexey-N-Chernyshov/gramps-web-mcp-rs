@@ -12,12 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
+use url::Url;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("missing or invalid environment variable: {0}")]
     Env(#[from] envy::Error),
+    #[error("{0}")]
+    Invalid(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -46,11 +50,17 @@ fn default_max_media_bytes() -> u64 {
     50 * 1024 * 1024
 }
 
+fn default_oauth_storage_path() -> String {
+    "./oauth_store.json".to_string()
+}
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct Config {
-    pub gramps_api_url: String,
-    pub gramps_username: String,
-    pub gramps_password: String,
+    pub gramps_api_url: Url,
+    #[serde(default)]
+    pub gramps_username: Option<String>,
+    #[serde(default)]
+    pub gramps_password: Option<SecretString>,
     #[serde(default)]
     pub gramps_readonly: bool,
     #[serde(default)]
@@ -59,23 +69,65 @@ pub struct Config {
     pub mcp_http_host: String,
     #[serde(default = "default_http_port")]
     pub mcp_http_port: u16,
-    pub mcp_auth_token: Option<String>,
+    pub mcp_auth_token: Option<SecretString>,
     #[serde(default)]
     pub mcp_allowed_hosts: Option<String>,
     #[serde(default = "default_mcp_keep_alive")]
     pub mcp_keep_alive: u64,
     #[serde(default = "default_max_media_bytes")]
     pub mcp_max_media_bytes: u64,
+    /// Enables per-user OAuth 2.1 authorization on the HTTP transport instead of
+    /// the single static `mcp_auth_token`/service-account identity.
+    /// Off by default.
+    #[serde(default)]
+    pub mcp_oauth_enabled: bool,
+    #[serde(default = "default_oauth_storage_path")]
+    pub mcp_oauth_storage_path: String,
+    #[serde(default)]
+    pub mcp_oauth_storage_key: Option<SecretString>,
+    #[serde(default)]
+    pub mcp_oauth_public_url: Option<Url>,
 }
 
 impl Config {
     pub fn from_env() -> Result<Self> {
         let mut cfg = envy::from_env::<Config>()?;
         // Treat MCP_AUTH_TOKEN="" the same as unset
-        if cfg.mcp_auth_token.as_deref() == Some("") {
+        if cfg
+            .mcp_auth_token
+            .as_ref()
+            .is_some_and(|t| t.expose_secret().is_empty())
+        {
             cfg.mcp_auth_token = None;
         }
+        cfg.validate()?;
         Ok(cfg)
+    }
+
+    fn validate(&self) -> Result<()> {
+        if self.mcp_oauth_enabled {
+            if self.mcp_oauth_storage_key.is_none() {
+                return Err(Error::Invalid(
+                    "MCP_OAUTH_STORAGE_KEY is required when MCP_OAUTH_ENABLED=true".into(),
+                ));
+            }
+            let Some(public_url) = &self.mcp_oauth_public_url else {
+                return Err(Error::Invalid(
+                    "MCP_OAUTH_PUBLIC_URL is required when MCP_OAUTH_ENABLED=true".into(),
+                ));
+            };
+            if public_url.scheme() != "https" {
+                return Err(Error::Invalid(
+                    "MCP_OAUTH_PUBLIC_URL must be an https:// URL".into(),
+                ));
+            }
+        } else if self.gramps_username.is_none() || self.gramps_password.is_none() {
+            return Err(Error::Invalid(
+                "GRAMPS_USERNAME and GRAMPS_PASSWORD are required unless MCP_OAUTH_ENABLED=true"
+                    .into(),
+            ));
+        }
+        Ok(())
     }
 }
 

@@ -15,31 +15,26 @@
 #[path = "support/helpers.rs"]
 mod common;
 
+use std::sync::Arc;
+
 use gramps_web_mcp_rs::{
+    auth::AuthManager,
     client::{Error, GrampsClient},
-    config::Config,
     tools::{delete, get},
 };
 
 #[tokio::test]
 async fn auth_fails_with_wrong_password() {
     let fixture = common::TestFixture::new().await;
-    let bad_client = GrampsClient::new(
-        Config {
-            gramps_api_url: fixture.base_url.clone(),
-            gramps_username: common::TEST_USER.to_string(),
-            gramps_password: "wrongpassword".to_string(),
-            gramps_readonly: false,
-            mcp_transport: Default::default(),
-            mcp_http_host: Default::default(),
-            mcp_http_port: Default::default(),
-            mcp_auth_token: None,
-            mcp_allowed_hosts: None,
-            mcp_keep_alive: 300,
-            mcp_max_media_bytes: 50 * 1024 * 1024,
-        },
-        reqwest::Client::new(),
+    let api_url: url::Url = fixture.base_url.parse().expect("test URL should be valid");
+    let http = reqwest::Client::new();
+    let auth = AuthManager::new(
+        api_url.clone(),
+        common::TEST_USER.to_string(),
+        "wrongpassword".to_string().into(),
+        http.clone(),
     );
+    let bad_client = GrampsClient::new(api_url, Arc::new(auth), 50 * 1024 * 1024, http);
     let result = get::get_tree_info(&bad_client).await;
     assert!(
         matches!(result, Err(Error::Auth(_))),

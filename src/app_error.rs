@@ -24,4 +24,6 @@ pub enum AppError {
     Join(#[from] tokio::task::JoinError),
     #[error(transparent)]
     ServerInit(#[from] Box<rmcp::service::ServerInitializeError>),
+    #[error(transparent)]
+    OAuthStore(#[from] crate::oauth::store::Error),
 }
