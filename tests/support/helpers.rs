@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use gramps_web_mcp_rs::{client::GrampsClient, config::Config};
-use std::time::Duration;
+use gramps_web_mcp_rs::{auth::AuthManager, client::GrampsClient};
+use std::{sync::Arc, time::Duration};
 use testcontainers::{
     compose::DockerCompose,
     core::{wait::HttpWaitStrategy, IntoContainerPort, WaitFor},
@@ -23,14 +23,17 @@ const COMPOSE_FILE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/docker-compose.
 const SERVICE: &str = "grampsweb-test";
 const PORT: u16 = 5000;
 pub const TEST_USER: &str = "testadmin";
-const TEST_PASS: &str = "Testpass1!";
+pub const TEST_PASS: &str = "Testpass1!";
 
 pub struct TestFixture {
     pub _compose: DockerCompose,
     // Not every test binary that includes this file via `#[path]` needs the base URL —
-    // only the ones that build their own GrampsClient against it.
+    // only the ones that build their own GrampsClient (or OAuth app) against it.
     #[allow(dead_code)]
     pub base_url: String,
+    // Likewise, `oauth_tests.rs` only needs `base_url` and builds its own clients
+    // through the OAuth flow rather than this pre-authenticated one.
+    #[allow(dead_code)]
     pub client: GrampsClient,
 }
 
@@ -58,22 +61,17 @@ impl TestFixture {
 
         register_admin(&base_url).await;
 
-        let client = GrampsClient::new(
-            Config {
-                gramps_api_url: base_url.clone(),
-                gramps_username: TEST_USER.to_string(),
-                gramps_password: TEST_PASS.to_string(),
-                gramps_readonly: false,
-                mcp_transport: Default::default(),
-                mcp_http_host: Default::default(),
-                mcp_http_port: Default::default(),
-                mcp_auth_token: None,
-                mcp_allowed_hosts: None,
-                mcp_keep_alive: 300,
-                mcp_max_media_bytes: 50 * 1024 * 1024,
-            },
-            reqwest::Client::new(),
+        let api_url: url::Url = base_url
+            .parse()
+            .expect("test container URL should be valid");
+        let http = reqwest::Client::new();
+        let auth = AuthManager::new(
+            api_url.clone(),
+            TEST_USER.to_string(),
+            TEST_PASS.to_string().into(),
+            http.clone(),
         );
+        let client = GrampsClient::new(api_url, Arc::new(auth), 50 * 1024 * 1024, http);
 
         Self {
             _compose: compose,
@@ -91,22 +89,15 @@ impl TestFixture {
 /// via `#[path]` don't need it.
 #[allow(dead_code)]
 pub fn client_for_url(base_url: &str, max_media_bytes: u64) -> GrampsClient {
-    GrampsClient::new(
-        Config {
-            gramps_api_url: base_url.to_string(),
-            gramps_username: TEST_USER.to_string(),
-            gramps_password: TEST_PASS.to_string(),
-            gramps_readonly: false,
-            mcp_transport: Default::default(),
-            mcp_http_host: Default::default(),
-            mcp_http_port: Default::default(),
-            mcp_auth_token: None,
-            mcp_allowed_hosts: None,
-            mcp_keep_alive: 300,
-            mcp_max_media_bytes: max_media_bytes,
-        },
-        reqwest::Client::new(),
-    )
+    let api_url: url::Url = base_url.parse().expect("test URL should be valid");
+    let http = reqwest::Client::new();
+    let auth = AuthManager::new(
+        api_url.clone(),
+        TEST_USER.to_string(),
+        TEST_PASS.to_string().into(),
+        http.clone(),
+    );
+    GrampsClient::new(api_url, Arc::new(auth), max_media_bytes, http)
 }
 
 async fn register_admin(base_url: &str) {

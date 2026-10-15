@@ -14,12 +14,16 @@
 
 mod params;
 
+use std::sync::Arc;
+
 use crate::{
+    auth::AuthManager,
     client::GrampsClient,
     config::Config,
     tools::{create, delete, get, media, merge, query, search, update},
 };
 use base64::Engine as _;
+use http::request::Parts;
 use params::{
     CreateCitationInput, CreateEventInput, CreateFamilyInput, CreateMediaInput, CreateNoteInput,
     CreatePersonInput, CreatePlaceInput, CreateRepositoryInput, CreateSourceInput, CreateTagInput,
@@ -44,7 +48,10 @@ use rmcp::{
 
 #[derive(Clone)]
 pub struct GrampsMcpServer {
-    client: GrampsClient,
+    /// The single service-account client (legacy/stdio mode). `None` in OAuth
+    /// mode, where every request instead carries its own per-user client via
+    /// `RequestContext.extensions` — see `client_for`.
+    client: Option<GrampsClient>,
     tools: ToolRouter<Self>,
 }
 
@@ -59,9 +66,44 @@ impl GrampsMcpServer {
                 tools.disable_route(*name);
             }
         }
-        Ok(Self {
-            client: GrampsClient::new(config, http),
-            tools,
+        let client = match (config.gramps_username, config.gramps_password) {
+            (Some(username), Some(password)) => {
+                let auth = AuthManager::new(
+                    config.gramps_api_url.clone(),
+                    username,
+                    password,
+                    http.clone(),
+                );
+                Some(GrampsClient::new(
+                    config.gramps_api_url,
+                    Arc::new(auth),
+                    config.mcp_max_media_bytes,
+                    http,
+                ))
+            }
+            _ => None,
+        };
+        Ok(Self { client, tools })
+    }
+
+    /// Resolves the Gramps identity for the current call: the per-request
+    /// client an OAuth middleware attached to the request (see
+    /// `oauth::identity_middleware`), falling back to the single
+    /// service-account client in legacy/stdio mode.
+    fn client_for(&self, context: &RequestContext<RoleServer>) -> Result<GrampsClient, McpError> {
+        if let Some(client) = context
+            .extensions
+            .get::<Parts>()
+            .and_then(|parts| parts.extensions.get::<GrampsClient>())
+        {
+            return Ok(client.clone());
+        }
+        self.client.clone().ok_or_else(|| {
+            McpError::internal_error(
+                "no Gramps identity available for this request (OAuth mode is enabled but no \
+                 authenticated client was attached)",
+                None,
+            )
         })
     }
 }
@@ -140,9 +182,11 @@ Use `page`/`pagesize` to paginate large result sets (default page=1, pagesize=20
             page,
             pagesize,
         }): Parameters<SearchInput>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
+        let client = self.client_for(&context)?;
         search::search(
-            &self.client,
+            &client,
             &query,
             object_type.map(|t| t.as_str()),
             page,
@@ -177,14 +221,16 @@ or \"repository\" (not \"tag\" — it has no rule catalog upstream).")]
     async fn get_filter_rules(
         &self,
         Parameters(ObjectTypeInput { object_type }): Parameters<ObjectTypeInput>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
+        let client = self.client_for(&context)?;
         let Some(object_type) = object_type else {
             return Ok(CallToolResult::error(vec![ContentBlock::text(
                 "`object_type` is required. Specify one of: \
                  \"person\", \"family\", \"event\", \"place\", \"note\", \"citation\", \"source\", \"media\", \"repository\"",
             )]));
         };
-        get::get_filter_rules(&self.client, object_type.as_endpoint())
+        get::get_filter_rules(&client, object_type.as_endpoint())
             .await
             .map_or_else(api_err, ok_json)
     }
@@ -205,7 +251,9 @@ Use `rules` for structured filtering (call get_rules_reference for syntax).")]
             page,
             pagesize,
         }): Parameters<GetObjectInput>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
+        let client = self.client_for(&context)?;
         let Some(object_type) = object_type else {
             return Ok(CallToolResult::error(vec![ContentBlock::text(
                 "`object_type` is required. Specify one of: \
@@ -213,10 +261,10 @@ Use `rules` for structured filtering (call get_rules_reference for syntax).")]
             )]));
         };
         let result = if let Some(h) = handle {
-            get::get_object_by_handle(&self.client, object_type.as_endpoint(), &h).await
+            get::get_object_by_handle(&client, object_type.as_endpoint(), &h).await
         } else if gramps_id.is_some() || rules.is_some() || page.is_some() || pagesize.is_some() {
             get::get_object_collection(
-                &self.client,
+                &client,
                 object_type.as_endpoint(),
                 gramps_id.as_deref(),
                 rules.as_ref(),
@@ -264,7 +312,9 @@ get_object + `rules` when you need to combine multiple native Gramps rules.")]
             after,
             count,
         }): Parameters<QueryObjectInput>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
+        let client = self.client_for(&context)?;
         let Some(object_type) = object_type else {
             return Ok(CallToolResult::error(vec![ContentBlock::text(
                 "`object_type` is required. Specify one of: \
@@ -283,7 +333,7 @@ get_object + `rules` when you need to combine multiple native Gramps rules.")]
                 .collect::<Vec<_>>()
         });
         query::query_object(
-            &self.client,
+            &client,
             object_type.as_endpoint(),
             select,
             where_expr,
@@ -300,8 +350,10 @@ get_object + `rules` when you need to combine multiple native Gramps rules.")]
     async fn get_relations(
         &self,
         Parameters(HandlePairInput { handle1, handle2 }): Parameters<HandlePairInput>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
-        get::get_relations(&self.client, &handle1, &handle2)
+        let client = self.client_for(&context)?;
+        get::get_relations(&client, &handle1, &handle2)
             .await
             .map_or_else(api_err, ok_json)
     }
@@ -310,8 +362,10 @@ get_object + `rules` when you need to combine multiple native Gramps rules.")]
     async fn get_person_timeline(
         &self,
         Parameters(HandleInput { handle }): Parameters<HandleInput>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
-        get::get_person_timeline(&self.client, &handle)
+        let client = self.client_for(&context)?;
+        get::get_person_timeline(&client, &handle)
             .await
             .map_or_else(api_err, ok_json)
     }
@@ -320,8 +374,10 @@ get_object + `rules` when you need to combine multiple native Gramps rules.")]
     async fn get_family_timeline(
         &self,
         Parameters(HandleInput { handle }): Parameters<HandleInput>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
-        get::get_family_timeline(&self.client, &handle)
+        let client = self.client_for(&context)?;
+        get::get_family_timeline(&client, &handle)
             .await
             .map_or_else(api_err, ok_json)
     }
@@ -330,15 +386,21 @@ get_object + `rules` when you need to combine multiple native Gramps rules.")]
     async fn get_event_span(
         &self,
         Parameters(HandlePairInput { handle1, handle2 }): Parameters<HandlePairInput>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
-        get::get_event_span(&self.client, &handle1, &handle2)
+        let client = self.client_for(&context)?;
+        get::get_event_span(&client, &handle1, &handle2)
             .await
             .map_or_else(api_err, ok_json)
     }
 
     #[tool(description = "Get tree-level statistics and metadata")]
-    async fn get_tree_info(&self) -> Result<CallToolResult, McpError> {
-        get::get_tree_info(&self.client)
+    async fn get_tree_info(
+        &self,
+        context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResult, McpError> {
+        let client = self.client_for(&context)?;
+        get::get_tree_info(&client)
             .await
             .map_or_else(api_err, ok_json)
     }
@@ -353,7 +415,9 @@ get_object + `rules` when you need to combine multiple native Gramps rules.")]
             surname,
             gender,
         }): Parameters<CreatePersonInput>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
+        let client = self.client_for(&context)?;
         use crate::models::person::{CreatePersonRequest, PersonName, Surname};
 
         let surname_list = surname
@@ -378,7 +442,7 @@ get_object + `rules` when you need to combine multiple native Gramps rules.")]
             ..Default::default()
         };
 
-        create::create_person(&self.client, req)
+        create::create_person(&client, req)
             .await
             .map_or_else(api_err, |handle| {
                 Ok(CallToolResult::success(vec![ContentBlock::text(format!(
@@ -394,7 +458,9 @@ get_object + `rules` when you need to combine multiple native Gramps rules.")]
             father_handle,
             mother_handle,
         }): Parameters<CreateFamilyInput>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
+        let client = self.client_for(&context)?;
         use crate::models::family::CreateFamilyRequest;
 
         let req = CreateFamilyRequest {
@@ -403,7 +469,7 @@ get_object + `rules` when you need to combine multiple native Gramps rules.")]
             ..Default::default()
         };
 
-        create::create_family(&self.client, req)
+        create::create_family(&client, req)
             .await
             .map_or_else(api_err, |handle| {
                 Ok(CallToolResult::success(vec![ContentBlock::text(format!(
@@ -422,7 +488,9 @@ get_object + `rules` when you need to combine multiple native Gramps rules.")]
             date_text,
             place_handle,
         }): Parameters<CreateEventInput>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
+        let client = self.client_for(&context)?;
         use crate::models::{event::CreateEventRequest, GrampsDate};
 
         let date = if let Some([d, m, y]) = date {
@@ -445,7 +513,7 @@ get_object + `rules` when you need to combine multiple native Gramps rules.")]
             ..Default::default()
         };
 
-        create::create_event(&self.client, req)
+        create::create_event(&client, req)
             .await
             .map_or_else(api_err, |handle| {
                 Ok(CallToolResult::success(vec![ContentBlock::text(format!(
@@ -458,7 +526,9 @@ get_object + `rules` when you need to combine multiple native Gramps rules.")]
     async fn create_place(
         &self,
         Parameters(CreatePlaceInput { title, place_type }): Parameters<CreatePlaceInput>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
+        let client = self.client_for(&context)?;
         use crate::models::place::{CreatePlaceRequest, PlaceName};
 
         let req = CreatePlaceRequest {
@@ -471,7 +541,7 @@ get_object + `rules` when you need to combine multiple native Gramps rules.")]
             ..Default::default()
         };
 
-        create::create_place(&self.client, req)
+        create::create_place(&client, req)
             .await
             .map_or_else(api_err, |handle| {
                 Ok(CallToolResult::success(vec![ContentBlock::text(format!(
@@ -488,7 +558,9 @@ get_object + `rules` when you need to combine multiple native Gramps rules.")]
             author,
             pubinfo,
         }): Parameters<CreateSourceInput>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
+        let client = self.client_for(&context)?;
         use crate::models::source::CreateSourceRequest;
 
         let req = CreateSourceRequest {
@@ -498,7 +570,7 @@ get_object + `rules` when you need to combine multiple native Gramps rules.")]
             ..Default::default()
         };
 
-        create::create_source(&self.client, req)
+        create::create_source(&client, req)
             .await
             .map_or_else(api_err, |handle| {
                 Ok(CallToolResult::success(vec![ContentBlock::text(format!(
@@ -515,8 +587,10 @@ get_object + `rules` when you need to combine multiple native Gramps rules.")]
             color,
             priority,
         }): Parameters<CreateTagInput>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
-        create::create_tag(&self.client, &name, color.as_deref(), priority)
+        let client = self.client_for(&context)?;
+        create::create_tag(&client, &name, color.as_deref(), priority)
             .await
             .map_or_else(api_err, |handle| {
                 Ok(CallToolResult::success(vec![ContentBlock::text(format!(
@@ -532,8 +606,10 @@ get_object + `rules` when you need to combine multiple native Gramps rules.")]
             source_handle,
             page,
         }): Parameters<CreateCitationInput>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
-        create::create_citation(&self.client, &source_handle, page.as_deref())
+        let client = self.client_for(&context)?;
+        create::create_citation(&client, &source_handle, page.as_deref())
             .await
             .map_or_else(api_err, |handle| {
                 Ok(CallToolResult::success(vec![ContentBlock::text(format!(
@@ -546,8 +622,10 @@ get_object + `rules` when you need to combine multiple native Gramps rules.")]
     async fn create_repository(
         &self,
         Parameters(CreateRepositoryInput { name, repo_type }): Parameters<CreateRepositoryInput>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
-        create::create_repository(&self.client, &name, repo_type.as_deref())
+        let client = self.client_for(&context)?;
+        create::create_repository(&client, &name, repo_type.as_deref())
             .await
             .map_or_else(api_err, |handle| {
                 Ok(CallToolResult::success(vec![ContentBlock::text(format!(
@@ -560,8 +638,10 @@ get_object + `rules` when you need to combine multiple native Gramps rules.")]
     async fn create_note(
         &self,
         Parameters(CreateNoteInput { text, note_type }): Parameters<CreateNoteInput>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
-        create::create_note(&self.client, &text, note_type.as_deref())
+        let client = self.client_for(&context)?;
+        create::create_note(&client, &text, note_type.as_deref())
             .await
             .map_or_else(api_err, |handle| {
                 Ok(CallToolResult::success(vec![ContentBlock::text(format!(
@@ -585,7 +665,9 @@ client's own workspace).")]
             mime,
             is_private,
         }): Parameters<CreateMediaInput>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
+        let client = self.client_for(&context)?;
         match (path.as_deref(), url.as_deref(), data_base64.as_deref()) {
             (_, _, Some(data_base64)) => {
                 let bytes = match base64::engine::general_purpose::STANDARD.decode(data_base64) {
@@ -597,7 +679,7 @@ client's own workspace).")]
                     }
                 };
                 media::create_media_from_bytes(
-                    &self.client,
+                    &client,
                     bytes,
                     description.as_deref(),
                     mime.as_deref(),
@@ -610,20 +692,17 @@ client's own workspace).")]
                     ))]))
                 })
             }
-            (_, Some(url), None) => create::create_media_from_url(
-                &self.client,
-                url,
-                description.as_deref(),
-                mime.as_deref(),
-            )
-            .await
-            .map_or_else(api_err, |handle| {
-                Ok(CallToolResult::success(vec![ContentBlock::text(format!(
-                    "Created media with handle: {handle}"
-                ))]))
-            }),
+            (_, Some(url), None) => {
+                create::create_media_from_url(&client, url, description.as_deref(), mime.as_deref())
+                    .await
+                    .map_or_else(api_err, |handle| {
+                        Ok(CallToolResult::success(vec![ContentBlock::text(format!(
+                            "Created media with handle: {handle}"
+                        ))]))
+                    })
+            }
             (Some(path), None, None) => create::create_media_from_path(
-                &self.client,
+                &client,
                 path,
                 description.as_deref(),
                 mime.as_deref(),
@@ -651,31 +730,28 @@ allow_private is explicitly set.")]
             max_bytes,
             allow_private,
         }): Parameters<GetMediaFileInput>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
-        media::get_media_file(
-            &self.client,
-            &handle,
-            max_bytes,
-            allow_private.unwrap_or(false),
-        )
-        .await
-        .map_or_else(api_err, |file| {
-            let summary = serde_json::json!({
-                "handle": handle,
-                "mime": file.mime,
-                "size_bytes": file.size_bytes,
-                "md5": file.md5,
-                "sha256": file.sha256,
-            });
-            let blob = base64::engine::general_purpose::STANDARD.encode(&file.bytes);
-            Ok(CallToolResult::success(vec![
-                ContentBlock::text(summary.to_string()),
-                ContentBlock::resource(
-                    ResourceContents::blob(blob, format!("gramps://media/{handle}/file"))
-                        .with_mime_type(file.mime.clone()),
-                ),
-            ]))
-        })
+        let client = self.client_for(&context)?;
+        media::get_media_file(&client, &handle, max_bytes, allow_private.unwrap_or(false))
+            .await
+            .map_or_else(api_err, |file| {
+                let summary = serde_json::json!({
+                    "handle": handle,
+                    "mime": file.mime,
+                    "size_bytes": file.size_bytes,
+                    "md5": file.md5,
+                    "sha256": file.sha256,
+                });
+                let blob = base64::engine::general_purpose::STANDARD.encode(&file.bytes);
+                Ok(CallToolResult::success(vec![
+                    ContentBlock::text(summary.to_string()),
+                    ContentBlock::resource(
+                        ResourceContents::blob(blob, format!("gramps://media/{handle}/file"))
+                            .with_mime_type(file.mime.clone()),
+                    ),
+                ]))
+            })
     }
 
     #[tool(description = "\
@@ -691,7 +767,9 @@ cross-checked against the file's actual content.")]
             expected_md5,
             expected_sha256,
         }): Parameters<ReplaceMediaFileInput>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
+        let client = self.client_for(&context)?;
         let bytes = match base64::engine::general_purpose::STANDARD.decode(&data_base64) {
             Ok(bytes) => bytes,
             Err(e) => {
@@ -701,7 +779,7 @@ cross-checked against the file's actual content.")]
             }
         };
         media::replace_media_file(
-            &self.client,
+            &client,
             &handle,
             bytes,
             mime.as_deref(),
@@ -731,11 +809,13 @@ cross-checked against the file's actual content.")]
     async fn update_person(
         &self,
         Parameters(UpdateInput { handle, data }): Parameters<UpdateInput>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
+        let client = self.client_for(&context)?;
         if let Some(err) = require_object(&data) {
             return err;
         }
-        update::update_person(&self.client, &handle, &data)
+        update::update_person(&client, &handle, &data)
             .await
             .map_or_else(api_err, ok_json)
     }
@@ -746,11 +826,13 @@ cross-checked against the file's actual content.")]
     async fn update_family(
         &self,
         Parameters(UpdateInput { handle, data }): Parameters<UpdateInput>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
+        let client = self.client_for(&context)?;
         if let Some(err) = require_object(&data) {
             return err;
         }
-        update::update_family(&self.client, &handle, &data)
+        update::update_family(&client, &handle, &data)
             .await
             .map_or_else(api_err, ok_json)
     }
@@ -761,11 +843,13 @@ cross-checked against the file's actual content.")]
     async fn update_event(
         &self,
         Parameters(UpdateInput { handle, data }): Parameters<UpdateInput>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
+        let client = self.client_for(&context)?;
         if let Some(err) = require_object(&data) {
             return err;
         }
-        update::update_event(&self.client, &handle, &data)
+        update::update_event(&client, &handle, &data)
             .await
             .map_or_else(api_err, ok_json)
     }
@@ -776,11 +860,13 @@ cross-checked against the file's actual content.")]
     async fn update_place(
         &self,
         Parameters(UpdateInput { handle, data }): Parameters<UpdateInput>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
+        let client = self.client_for(&context)?;
         if let Some(err) = require_object(&data) {
             return err;
         }
-        update::update_place(&self.client, &handle, &data)
+        update::update_place(&client, &handle, &data)
             .await
             .map_or_else(api_err, ok_json)
     }
@@ -791,11 +877,13 @@ cross-checked against the file's actual content.")]
     async fn update_source(
         &self,
         Parameters(UpdateInput { handle, data }): Parameters<UpdateInput>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
+        let client = self.client_for(&context)?;
         if let Some(err) = require_object(&data) {
             return err;
         }
-        update::update_source(&self.client, &handle, &data)
+        update::update_source(&client, &handle, &data)
             .await
             .map_or_else(api_err, ok_json)
     }
@@ -806,11 +894,13 @@ cross-checked against the file's actual content.")]
     async fn update_citation(
         &self,
         Parameters(UpdateInput { handle, data }): Parameters<UpdateInput>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
+        let client = self.client_for(&context)?;
         if let Some(err) = require_object(&data) {
             return err;
         }
-        update::update_citation(&self.client, &handle, &data)
+        update::update_citation(&client, &handle, &data)
             .await
             .map_or_else(api_err, ok_json)
     }
@@ -821,11 +911,13 @@ cross-checked against the file's actual content.")]
     async fn update_repository(
         &self,
         Parameters(UpdateInput { handle, data }): Parameters<UpdateInput>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
+        let client = self.client_for(&context)?;
         if let Some(err) = require_object(&data) {
             return err;
         }
-        update::update_repository(&self.client, &handle, &data)
+        update::update_repository(&client, &handle, &data)
             .await
             .map_or_else(api_err, ok_json)
     }
@@ -836,11 +928,13 @@ cross-checked against the file's actual content.")]
     async fn update_note(
         &self,
         Parameters(UpdateInput { handle, data }): Parameters<UpdateInput>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
+        let client = self.client_for(&context)?;
         if let Some(err) = require_object(&data) {
             return err;
         }
-        update::update_note(&self.client, &handle, &data)
+        update::update_note(&client, &handle, &data)
             .await
             .map_or_else(api_err, ok_json)
     }
@@ -851,11 +945,13 @@ cross-checked against the file's actual content.")]
     async fn update_tag(
         &self,
         Parameters(UpdateInput { handle, data }): Parameters<UpdateInput>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
+        let client = self.client_for(&context)?;
         if let Some(err) = require_object(&data) {
             return err;
         }
-        update::update_tag(&self.client, &handle, &data)
+        update::update_tag(&client, &handle, &data)
             .await
             .map_or_else(api_err, ok_json)
     }
@@ -866,11 +962,13 @@ cross-checked against the file's actual content.")]
     async fn update_media(
         &self,
         Parameters(UpdateInput { handle, data }): Parameters<UpdateInput>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
+        let client = self.client_for(&context)?;
         if let Some(err) = require_object(&data) {
             return err;
         }
-        update::update_media(&self.client, &handle, &data)
+        update::update_media(&client, &handle, &data)
             .await
             .map_or_else(api_err, ok_json)
     }
@@ -886,14 +984,16 @@ Delete an object by handle. `object_type` is required, as a quoted string: \
             object_type,
             handle,
         }): Parameters<DeleteObjectInput>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
+        let client = self.client_for(&context)?;
         let Some(object_type) = object_type else {
             return Ok(CallToolResult::error(vec![ContentBlock::text(
                 "`object_type` is required. Specify one of: \
                  \"person\", \"family\", \"event\", \"place\", \"note\", \"citation\", \"source\", \"media\", \"repository\", \"tag\"",
             )]));
         };
-        delete::delete_object(&self.client, object_type.as_endpoint(), &handle)
+        delete::delete_object(&client, object_type.as_endpoint(), &handle)
             .await
             .map_or_else(api_err, |_| {
                 Ok(CallToolResult::success(vec![ContentBlock::text(format!(
@@ -915,9 +1015,11 @@ Set family_merger=true (default) to also merge their families.")]
             duplicate_handle,
             family_merger,
         }): Parameters<MergePersonInput>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
+        let client = self.client_for(&context)?;
         merge::merge_person(
-            &self.client,
+            &client,
             &survivor_handle,
             &duplicate_handle,
             family_merger.unwrap_or(true),
@@ -941,9 +1043,11 @@ Optionally specify which father/mother handle to keep.")]
             phoenix_father_handle,
             phoenix_mother_handle,
         }): Parameters<MergeFamilyInput>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
+        let client = self.client_for(&context)?;
         merge::merge_family(
-            &self.client,
+            &client,
             &survivor_handle,
             &duplicate_handle,
             phoenix_father_handle.as_deref(),
@@ -966,8 +1070,10 @@ Optionally specify which father/mother handle to keep.")]
             survivor_handle,
             duplicate_handle,
         }): Parameters<MergeInput>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
-        merge::merge_citation(&self.client, &survivor_handle, &duplicate_handle)
+        let client = self.client_for(&context)?;
+        merge::merge_citation(&client, &survivor_handle, &duplicate_handle)
             .await
             .map_or_else(api_err, |_| {
                 Ok(CallToolResult::success(vec![ContentBlock::text(format!(
@@ -983,8 +1089,10 @@ Optionally specify which father/mother handle to keep.")]
             survivor_handle,
             duplicate_handle,
         }): Parameters<MergeInput>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
-        merge::merge_event(&self.client, &survivor_handle, &duplicate_handle)
+        let client = self.client_for(&context)?;
+        merge::merge_event(&client, &survivor_handle, &duplicate_handle)
             .await
             .map_or_else(api_err, |_| {
                 Ok(CallToolResult::success(vec![ContentBlock::text(format!(
@@ -1002,8 +1110,10 @@ Optionally specify which father/mother handle to keep.")]
             survivor_handle,
             duplicate_handle,
         }): Parameters<MergeInput>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
-        merge::merge_media(&self.client, &survivor_handle, &duplicate_handle)
+        let client = self.client_for(&context)?;
+        merge::merge_media(&client, &survivor_handle, &duplicate_handle)
             .await
             .map_or_else(api_err, |_| {
                 Ok(CallToolResult::success(vec![ContentBlock::text(format!(
@@ -1019,8 +1129,10 @@ Optionally specify which father/mother handle to keep.")]
             survivor_handle,
             duplicate_handle,
         }): Parameters<MergeInput>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
-        merge::merge_note(&self.client, &survivor_handle, &duplicate_handle)
+        let client = self.client_for(&context)?;
+        merge::merge_note(&client, &survivor_handle, &duplicate_handle)
             .await
             .map_or_else(api_err, |_| {
                 Ok(CallToolResult::success(vec![ContentBlock::text(format!(
@@ -1036,8 +1148,10 @@ Optionally specify which father/mother handle to keep.")]
             survivor_handle,
             duplicate_handle,
         }): Parameters<MergeInput>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
-        merge::merge_place(&self.client, &survivor_handle, &duplicate_handle)
+        let client = self.client_for(&context)?;
+        merge::merge_place(&client, &survivor_handle, &duplicate_handle)
             .await
             .map_or_else(api_err, |_| {
                 Ok(CallToolResult::success(vec![ContentBlock::text(format!(
@@ -1055,8 +1169,10 @@ Optionally specify which father/mother handle to keep.")]
             survivor_handle,
             duplicate_handle,
         }): Parameters<MergeInput>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
-        merge::merge_repository(&self.client, &survivor_handle, &duplicate_handle)
+        let client = self.client_for(&context)?;
+        merge::merge_repository(&client, &survivor_handle, &duplicate_handle)
             .await
             .map_or_else(api_err, |_| {
                 Ok(CallToolResult::success(vec![ContentBlock::text(format!(
@@ -1072,8 +1188,10 @@ Optionally specify which father/mother handle to keep.")]
             survivor_handle,
             duplicate_handle,
         }): Parameters<MergeInput>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
-        merge::merge_source(&self.client, &survivor_handle, &duplicate_handle)
+        let client = self.client_for(&context)?;
+        merge::merge_source(&client, &survivor_handle, &duplicate_handle)
             .await
             .map_or_else(api_err, |_| {
                 Ok(CallToolResult::success(vec![ContentBlock::text(format!(

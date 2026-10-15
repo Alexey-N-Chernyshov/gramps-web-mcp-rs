@@ -12,9 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use serde::de::DeserializeOwned;
+use std::sync::Arc;
 
-use crate::{auth::AuthManager, config::Config};
+use serde::de::DeserializeOwned;
+use url::Url;
+
+use crate::auth::TokenSource;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -39,18 +42,22 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub struct GrampsClient {
     base_url: String,
     http: reqwest::Client,
-    auth: AuthManager,
+    auth: Arc<dyn TokenSource>,
     max_media_bytes: u64,
 }
 
 impl GrampsClient {
-    pub fn new(config: Config, http: reqwest::Client) -> Self {
-        let auth = AuthManager::new(config.clone(), http.clone());
+    pub fn new(
+        api_url: Url,
+        auth: Arc<dyn TokenSource>,
+        max_media_bytes: u64,
+        http: reqwest::Client,
+    ) -> Self {
         Self {
-            base_url: config.gramps_api_url.trim_end_matches('/').to_string(),
+            base_url: api_url.as_str().trim_end_matches('/').to_string(),
             http,
             auth,
-            max_media_bytes: config.mcp_max_media_bytes,
+            max_media_bytes,
         }
     }
 
