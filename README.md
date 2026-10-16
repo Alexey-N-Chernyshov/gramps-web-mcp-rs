@@ -1,49 +1,45 @@
 # gramps-web-mcp-rs
 
-MCP server for [Gramps Web](https://www.grampsweb.org/) genealogy API, written in Rust.
+Connect your MCP client to your [Gramps Web](https://www.grampsweb.org/) family tree, and research, edit and clean it by describing what you want.
 
-Connects your AI client (Claude Desktop, Claude Code, etc.) directly to your Gramps Web instance. Exposes tools covering search, read, create, update, delete, merge, and transaction operations.
+<!-- TODO: demo gif -->
 
-## Setup
+## What you can do
 
-Choose a deployment mode based on where you run the MCP server:
+- "Find everyone born in Ohio before 1900 whose death date is unknown."
+- "Add this family to the tree from the source I'm pasting, with a citation for each fact."
+- "Find likely duplicate people in the tree and merge the ones that match."
+- "Build a timeline of everything recorded about this person's life."
 
-| Mode                        | When to use                                               | Guide                                                          |
-| --------------------------- | --------------------------------------------------------- | -------------------------------------------------------------- |
-| **Local (stdio)**           | AI client and Gramps Web are on the same machine          | [docs/setup-local.md](docs/setup-local.md)                     |
-| **LAN / VPN (HTTP)**        | Gramps Web is on a home server, reachable via LAN or VPN  | [docs/setup-server-lan.md](docs/setup-server-lan.md)           |
-| **Public server (HTTP+TLS)**| Gramps Web is exposed to the internet via reverse proxy   | [docs/setup-server-public.md](docs/setup-server-public.md)     |
+## Why this server
 
-## Configuration
+Built with three priorities: efficiency in every sense (small footprint, low token usage), security, and reliability.
 
-| Variable            | Default   | Description                                                                                                                                                                                                                      |
-| ------------------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GRAMPS_API_URL`    | —         | Base URL of your Gramps Web instance, e.g. `https://gramps.example.com` or `http://localhost:5000`. Must include the scheme (`http://` or `https://`).                                                                           |
-| `GRAMPS_USERNAME`   | —         | Gramps Web username                                                                                                                                                                                                              |
-| `GRAMPS_PASSWORD`   | —         | Gramps Web password                                                                                                                                                                                                              |
-| `GRAMPS_READONLY`   | `false`   | Set to `true` to expose only read tools. Convenience flag — for real access control use a Gramps Web account with the Viewer role.                                                                                               |
-| `MCP_TRANSPORT`     | `stdio`   | Transport mode: `stdio` or `http`                                                                                                                                                                                                |
-| `MCP_HTTP_HOST`     | `0.0.0.0` | Bind host in HTTP mode                                                                                                                                                                                                           |
-| `MCP_HTTP_PORT`     | `3000`    | Bind port in HTTP mode                                                                                                                                                                                                           |
-| `MCP_AUTH_TOKEN`    | —         | Bearer token protecting the `/mcp` endpoint in HTTP mode. If unset, no authentication is performed — only safe on a trusted LAN.                                                                                                 |
-| `MCP_ALLOWED_HOSTS` | —         | Comma-separated list of allowed `Host` header values for HTTP transport (DNS-rebinding protection). If unset, only `localhost`/`127.0.0.1`/`::1` are allowed (rmcp default). Example: `your-domain.com:8888,localhost,127.0.0.1` |
-| `MCP_KEEP_ALIVE`    | `300`     | MCP session keep-alive timeout in seconds. Set to `0` to disable session expiration. |
+- Apache-2.0 licensed.
+- Full CRUD for every Gramps object type (person, family, event, place, source, citation, repository, note, media, tag), plus merge for every type Gramps itself supports merging on.
+- Structured queries: GOQL expressions and Gramps' own native filter rules — not just free-text search.
+- Per-user OAuth 2.1 (Authorization Code + PKCE + Dynamic Client Registration) or a static bearer token, for the HTTP transport.
+- Read-only mode that exposes only read tools.
 
----
+See the wiki's [Alternatives](https://github.com/Alexey-N-Chernyshov/gramps-web-mcp-rs/wiki/Alternatives) page for how this compares to other options.
 
-## For developers
+## Requirements
 
-### Local build
+Gramps Web 26.10.0 or newer (gramps-web-api 3.23+).
 
-```bash
-cp .env.example .env
-# edit .env with your values
-cargo run
-```
+## Get started
 
-### Docker build
+- No Gramps Web yet → [wiki Quickstart](https://github.com/Alexey-N-Chernyshov/gramps-web-mcp-rs/wiki/Quickstart) (5 minutes, Docker).
+- Have Gramps Web → [docs/choose-setup.md](docs/choose-setup.md).
 
-```bash
-docker compose -f docker-compose.dev.yml build
-docker compose -f docker-compose.dev.yml up
-```
+## Documentation
+
+Full documentation index: [docs/README.md](docs/README.md). See also the [wiki](https://github.com/Alexey-N-Chernyshov/gramps-web-mcp-rs/wiki).
+
+## Development
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for building, running, and testing locally.
+
+## License
+
+[Apache-2.0](LICENSE)
