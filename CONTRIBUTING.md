@@ -8,6 +8,9 @@ cp .env.example .env
 cargo run
 ```
 
+With `MCP_OAUTH_ENABLED=true`, also set `MCP_OAUTH_STORAGE_PATH=./oauth_store.json` —
+the default `/data/oauth_store.json` only exists inside the Docker image.
+
 ## Docker build
 
 ```bash
