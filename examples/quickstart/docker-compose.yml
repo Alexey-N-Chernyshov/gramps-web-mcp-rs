@@ -1,0 +1,106 @@
+# Gramps Web, from scratch, for trying the MCP server locally.
+# The network name below must stay stable — the MCP server is launched
+# separately (see README.md) with `docker run --network gramps-quickstart_default`.
+name: gramps-quickstart
+
+services:
+  grampsweb: &grampsweb
+    image: ghcr.io/gramps-project/grampsweb:26.10.0
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5000:5000"
+    environment:
+      GRAMPSWEB_TREE: main
+      GRAMPSWEB_CELERY_CONFIG__broker_url: redis://grampsweb_redis:6379/0
+      GRAMPSWEB_CELERY_CONFIG__result_backend: redis://grampsweb_redis:6379/0
+      GRAMPSWEB_RATELIMIT_STORAGE_URI: redis://grampsweb_redis:6379/1
+      GRAMPSWEB_GUNICORN_WORKERS: "1"
+    volumes:
+      - gramps_users:/app/users
+      - gramps_index:/app/indexdir
+      - gramps_thumb_cache:/app/thumbnail_cache
+      - gramps_cache:/app/cache
+      - gramps_secret:/app/secret
+      - gramps_db:/root/.gramps
+      - gramps_media:/app/media
+      - gramps_tmp:/tmp
+    depends_on:
+      - grampsweb_redis
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:5000/')",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+
+  grampsweb_celery:
+    <<: *grampsweb
+    ports: []
+    restart: unless-stopped
+    # Must wait for grampsweb itself, not just redis: both run the same
+    # image's entrypoint, which runs a database migration on every start —
+    # running two at once against the same SQLite file corrupts its
+    # migration history.
+    depends_on:
+      grampsweb:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+    command: celery -A gramps_webapi.celery worker --loglevel=INFO --concurrency=1
+
+  grampsweb_redis:
+    image: docker.io/valkey/valkey:8-alpine
+    restart: unless-stopped
+
+  grampsweb_init:
+    # Creates the MCP service account on first run; `|| true` makes this
+    # idempotent — safe to run again on every restart.
+    image: ghcr.io/gramps-project/grampsweb:26.10.0
+    restart: "no"
+    environment:
+      GRAMPSWEB_TREE: main
+    volumes:
+      - gramps_users:/app/users
+      - gramps_secret:/app/secret
+    command: >
+      sh -c "python3 -m gramps_webapi user add gramps-mcp gramps-mcp --email gramps-mcp@localhost --role 3 || true"
+    depends_on:
+      grampsweb:
+        condition: service_healthy
+
+  # Optional: MCP server over HTTP, for testing the HTTP transport itself.
+  # The default way to use this quickstart is the stdio `docker run`
+  # command in README.md — this service is not needed for that.
+  # `docker compose --profile http up -d` to add it.
+  # Localhost only, no auth token — local testing only, do not expose this port.
+  gramps_mcp_http:
+    image: ghcr.io/alexey-n-chernyshov/gramps-web-mcp-rs:latest
+    restart: unless-stopped
+    profiles: [http]
+    environment:
+      GRAMPS_API_URL: http://grampsweb:5000
+      GRAMPS_USERNAME: gramps-mcp
+      GRAMPS_PASSWORD: gramps-mcp
+      MCP_TRANSPORT: http
+      MCP_HTTP_PORT: 3000
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      grampsweb:
+        condition: service_healthy
+
+volumes:
+  gramps_users:
+  gramps_index:
+  gramps_thumb_cache:
+  gramps_cache:
+  gramps_secret:
+  gramps_db:
+  gramps_media:
+  gramps_tmp:
