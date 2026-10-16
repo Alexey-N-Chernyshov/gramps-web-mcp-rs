@@ -1,12 +1,9 @@
-FROM rust:1-alpine AS chef
+FROM lukemathwalker/cargo-chef:latest-rust-1-alpine AS chef
 ARG TARGETARCH
-RUN apk add --no-cache gcc musl-dev && \
-    case "$TARGETARCH" in \
+RUN case "$TARGETARCH" in \
     amd64) rustup target add x86_64-unknown-linux-musl ;; \
     arm64) rustup target add aarch64-unknown-linux-musl ;; \
-    esac && \
-    cargo install cargo-chef --locked && \
-    cargo install cargo-about --features cli --locked
+    esac
 WORKDIR /app
 
 FROM chef AS planner
@@ -27,13 +24,30 @@ RUN case "$TARGETARCH" in \
     arm64) RUST_TARGET=aarch64-unknown-linux-musl ;; \
     esac && \
     cargo build --release --target $RUST_TARGET && \
-    cp target/$RUST_TARGET/release/gramps-web-mcp-rs /gramps-web-mcp-rs && \
-    cargo about generate -c .config/about.toml .config/about.hbs -o THIRD_PARTY_NOTICES.html
+    cp target/$RUST_TARGET/release/gramps-web-mcp-rs /gramps-web-mcp-rs
+
+FROM chef AS notices
+ARG TARGETARCH
+RUN case "$TARGETARCH" in \
+    amd64) BINSTALL_ARCH=x86_64 ;; \
+    arm64) BINSTALL_ARCH=aarch64 ;; \
+    esac && \
+    wget -qO- "https://github.com/cargo-bins/cargo-binstall/releases/latest/download/cargo-binstall-${BINSTALL_ARCH}-unknown-linux-musl.tgz" \
+    | tar -xz -C /usr/local/cargo/bin && \
+    CARGO_ABOUT_VERSION=$(wget -qO- https://api.github.com/repos/EmbarkStudios/cargo-about/releases/latest \
+    | grep -m1 '"tag_name"' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/') && \
+    cargo binstall --no-confirm \
+    --pkg-url "https://github.com/EmbarkStudios/cargo-about/releases/download/{version}/cargo-about-{version}-{target}.tar.gz" \
+    --pkg-fmt tgz \
+    --bin-dir "cargo-about-{version}-{target}/{bin}{binary-ext}" \
+    "cargo-about@${CARGO_ABOUT_VERSION}"
+COPY . .
+RUN cargo about generate -c .config/about.toml .config/about.hbs -o THIRD_PARTY_NOTICES.html
 
 FROM alpine:3.24 AS runtime
 RUN addgroup -S nonroot && adduser -S nonroot -G nonroot
 RUN mkdir /data && chown nonroot:nonroot /data
 COPY --from=builder /gramps-web-mcp-rs /usr/local/bin/gramps-web-mcp-rs
-COPY --from=builder /app/THIRD_PARTY_NOTICES.html /THIRD_PARTY_NOTICES.html
+COPY --from=notices /app/THIRD_PARTY_NOTICES.html /THIRD_PARTY_NOTICES.html
 USER nonroot
 ENTRYPOINT ["/usr/local/bin/gramps-web-mcp-rs"]
