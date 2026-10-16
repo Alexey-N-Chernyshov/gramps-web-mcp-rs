@@ -51,6 +51,8 @@ jobs:
             args: --test merge_tests
           - name: oauth_tests
             args: --test oauth_tests
+          - name: oauth_prefix_tests
+            args: --test oauth_prefix_tests
           - name: person_family_tests
             args: --test person_family_tests
           - name: query_tests

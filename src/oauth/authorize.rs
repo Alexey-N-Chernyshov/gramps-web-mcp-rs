@@ -50,7 +50,7 @@ pub async fn show_form(
     if let Err(message) = validate(&state, &params).await {
         return bad_request(message);
     }
-    Html(render_form(&params, None)).into_response()
+    Html(render_form(&state, &params, None)).into_response()
 }
 
 #[derive(Debug, Deserialize)]
@@ -82,11 +82,12 @@ pub async fn submit(
         return bad_request(message);
     }
 
-    let refresh_token =
-        match fetch_gramps_refresh_token(&state, &form.username, &form.password).await {
-            Ok(token) => token,
-            Err(message) => return Html(render_form(&params, Some(&message))).into_response(),
-        };
+    let refresh_token = match fetch_gramps_refresh_token(&state, &form.username, &form.password)
+        .await
+    {
+        Ok(token) => token,
+        Err(message) => return Html(render_form(&state, &params, Some(&message))).into_response(),
+    };
 
     let code = match state
         .store
@@ -103,6 +104,7 @@ pub async fn submit(
         Err(e) => {
             tracing::error!(%e, "failed to persist authorization code");
             return Html(render_form(
+                &state,
                 &params,
                 Some("Internal error, please try again."),
             ))
@@ -132,7 +134,7 @@ async fn validate(state: &OAuthState, params: &AuthorizeParams) -> Result<(), &'
     }
     let Some(client) = state.store.get_client(&params.client_id).await else {
         tracing::warn!(?params, "authorize rejected: unknown client_id");
-        return Err("unknown client_id — register via /register first");
+        return Err("unknown client_id — register a client first");
     };
     if !redirect_uri_allowed(&client.redirect_uris, &params.redirect_uri) {
         tracing::warn!(
@@ -210,10 +212,11 @@ fn bad_request(message: &str) -> Response {
     (StatusCode::BAD_REQUEST, message.to_string()).into_response()
 }
 
-fn render_form(params: &AuthorizeParams, error: Option<&str>) -> String {
+fn render_form(state: &OAuthState, params: &AuthorizeParams, error: Option<&str>) -> String {
     let error_html = error
         .map(|e| format!(r#"<p class="error">{}</p>"#, html_escape(e)))
         .unwrap_or_default();
+    let action = format!("{}/authorize", super::issuer_prefix(&state.issuer));
     format!(
         r#"<!DOCTYPE html>
 <html lang="en">
@@ -232,7 +235,7 @@ fn render_form(params: &AuthorizeParams, error: Option<&str>) -> String {
 <body>
 <h1>Sign in to Gramps</h1>
 {error_html}
-<form method="post" action="/authorize">
+<form method="post" action="{action}">
   <input type="hidden" name="client_id" value="{client_id}">
   <input type="hidden" name="redirect_uri" value="{redirect_uri}">
   <input type="hidden" name="state" value="{state}">
