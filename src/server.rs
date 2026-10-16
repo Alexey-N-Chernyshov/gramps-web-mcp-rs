@@ -53,6 +53,7 @@ pub struct GrampsMcpServer {
     /// `RequestContext.extensions` — see `client_for`.
     client: Option<GrampsClient>,
     tools: ToolRouter<Self>,
+    readonly: bool,
 }
 
 impl GrampsMcpServer {
@@ -83,7 +84,11 @@ impl GrampsMcpServer {
             }
             _ => None,
         };
-        Ok(Self { client, tools })
+        Ok(Self {
+            client,
+            tools,
+            readonly: config.gramps_readonly,
+        })
     }
 
     /// Resolves the Gramps identity for the current call: the per-request
@@ -1204,17 +1209,24 @@ Optionally specify which father/mother handle to keep.")]
 #[tool_handler]
 impl ServerHandler for GrampsMcpServer {
     fn get_info(&self) -> ServerConfig {
+        let mut instructions = INSTRUCTIONS.to_string();
+        instructions.push_str(if self.readonly {
+            READONLY_NOTICE
+        } else {
+            WRITE_GUIDANCE
+        });
         ServerConfig::new(
             ServerCapabilities::builder()
                 .enable_tools()
                 .enable_resources()
                 .build(),
         )
-        .with_instructions("MCP server for accessing genealogy data via the Gramps Web API.")
-        .with_server_info(Implementation::new(
-            "gramps-web-mcp",
-            env!("CARGO_PKG_VERSION"),
-        ))
+        .with_instructions(instructions)
+        .with_server_info(
+            Implementation::new("gramps-web-mcp", env!("CARGO_PKG_VERSION")).with_description(
+                "MCP server for accessing genealogy data via the Gramps Web API.",
+            ),
+        )
     }
 
     async fn list_resources(
@@ -1329,6 +1341,15 @@ impl ServerHandler for GrampsMcpServer {
 
 const GOQL_REFERENCE: &str = include_str!("resources/goql_reference.md");
 const RULES_REFERENCE: &str = include_str!("resources/rules_reference.md");
+const INSTRUCTIONS: &str = include_str!("resources/instructions.md");
+
+const WRITE_GUIDANCE: &str = "\nBefore merge_* or delete_object, show the user what will \
+change and wait for confirmation. Prefer merge_* over delete_object + create for duplicate \
+records. When adding a fact (event, name, attribute), attach a source or citation if one is \
+available.";
+
+const READONLY_NOTICE: &str = "\nThis server is in read-only mode: create/update/delete/merge \
+tools are not published. If asked to change data, say so instead of retrying a write call.";
 
 // See the WORKAROUND comment on list_tools above.
 fn fix_schema(v: &mut serde_json::Value) {
@@ -1341,5 +1362,53 @@ fn fix_schema(v: &mut serde_json::Value) {
         serde_json::Value::Object(m) => m.values_mut().for_each(fix_schema),
         serde_json::Value::Array(arr) => arr.iter_mut().for_each(fix_schema),
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn instructions_are_non_empty() {
+        assert!(!INSTRUCTIONS.trim().is_empty());
+        assert!(!WRITE_GUIDANCE.trim().is_empty());
+        assert!(!READONLY_NOTICE.trim().is_empty());
+    }
+
+    /// Catches drift if a tool named here gets renamed and the instructions
+    /// text isn't updated to match.
+    #[test]
+    fn instructions_only_mention_real_tool_names() {
+        let real_tools: std::collections::HashSet<String> = GrampsMcpServer::tool_router()
+            .list_all()
+            .into_iter()
+            .map(|tool| tool.name.to_string())
+            .collect();
+
+        let full_text = format!("{INSTRUCTIONS}{WRITE_GUIDANCE}{READONLY_NOTICE}");
+        for name in [
+            "search",
+            "query_object",
+            "get_goql_reference",
+            "get_rules_reference",
+            "get_object",
+            "delete_object",
+        ] {
+            assert!(
+                full_text.contains(name),
+                "expected instructions to mention `{name}`"
+            );
+            assert!(
+                real_tools.contains(name),
+                "instructions mention `{name}`, but no such tool exists — rename drift?"
+            );
+        }
+
+        // `merge_*` is referenced as a family (wildcard), not a literal tool name.
+        assert!(
+            real_tools.iter().any(|t| t.starts_with("merge_")),
+            "instructions reference a `merge_*` family that no longer exists"
+        );
     }
 }
