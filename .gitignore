@@ -1,3 +1,4 @@
 /target
 .env
 .mcp.json
+oauth_store.json
