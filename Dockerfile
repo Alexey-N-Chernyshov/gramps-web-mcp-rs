@@ -34,7 +34,13 @@ RUN case "$TARGETARCH" in \
     esac && \
     wget -qO- "https://github.com/cargo-bins/cargo-binstall/releases/latest/download/cargo-binstall-${BINSTALL_ARCH}-unknown-linux-musl.tgz" \
     | tar -xz -C /usr/local/cargo/bin && \
-    cargo binstall --no-confirm --locked cargo-about
+    CARGO_ABOUT_VERSION=$(wget -qO- https://api.github.com/repos/EmbarkStudios/cargo-about/releases/latest \
+    | grep -m1 '"tag_name"' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/') && \
+    cargo binstall --no-confirm \
+    --pkg-url "https://github.com/EmbarkStudios/cargo-about/releases/download/{version}/cargo-about-{version}-{target}.tar.gz" \
+    --pkg-fmt tgz \
+    --bin-dir "cargo-about-{version}-{target}/{bin}{binary-ext}" \
+    "cargo-about@${CARGO_ABOUT_VERSION}"
 COPY . .
 RUN cargo about generate -c .config/about.toml .config/about.hbs -o THIRD_PARTY_NOTICES.html
 
