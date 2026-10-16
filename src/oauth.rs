@@ -21,6 +21,18 @@
 //! `GrampsClient` for whichever user is attached to the request's
 //! extensions, which `GrampsMcpServer::client_for` (in the bin crate) reads
 //! back out via rmcp's `RequestContext`.
+//!
+//! Where these routes get mounted is driven entirely by the path component
+//! of `MCP_OAUTH_PUBLIC_URL` (`OAuthState::issuer`) — the code has no
+//! opinion of its own about deployment topology. A bare-root issuer (e.g.
+//! `https://mcp.example.com`) mounts everything at the root, as before. An
+//! issuer with a path (e.g. `https://gramps.example.com/mcp`, for a host
+//! shared with Gramps Web behind a path-based reverse proxy) nests
+//! `/register`, `/authorize` and `/token` under that path, and builds the
+//! two discovery documents at the RFC 8414/9728 path-aware location
+//! (`/.well-known/<suffix><path>`, inserted after the host and before the
+//! path — never under the path itself, since that's what the RFCs require
+//! and what clients probe for).
 
 mod authorize;
 mod metadata;
@@ -56,23 +68,41 @@ pub struct OAuthState {
 
 /// The unauthenticated OAuth endpoints: discovery, DCR, login, token
 /// issuance. Mount this alongside (not behind) the `/mcp` route.
+///
+/// Routes nest under whatever path `state.issuer` carries (see the module
+/// docs) — `""` (bare-root issuer) reduces to the original fixed paths.
 pub fn router(state: Arc<OAuthState>) -> Router {
+    let prefix = issuer_prefix(&state.issuer);
     Router::new()
         .route(
-            "/.well-known/oauth-protected-resource",
+            &well_known_path("oauth-protected-resource", &prefix),
             get(metadata::protected_resource),
         )
         .route(
-            "/.well-known/oauth-authorization-server",
+            &well_known_path("oauth-authorization-server", &prefix),
             get(metadata::authorization_server),
         )
-        .route("/register", post(register::register))
+        .route(&format!("{prefix}/register"), post(register::register))
         .route(
-            "/authorize",
+            &format!("{prefix}/authorize"),
             get(authorize::show_form).post(authorize::submit),
         )
-        .route("/token", post(token::token))
+        .route(&format!("{prefix}/token"), post(token::token))
         .with_state(state)
+}
+
+/// The issuer's path component, normalized to either `""` (bare-root
+/// issuer) or a leading-slash, no-trailing-slash path like `"/mcp"`.
+fn issuer_prefix(issuer: &Url) -> String {
+    issuer.path().trim_end_matches('/').to_string()
+}
+
+/// The RFC 8414/9728 path-aware well-known URI: the `.well-known` suffix is
+/// inserted right after the host, with the issuer's own path appended
+/// after it — e.g. `/.well-known/oauth-protected-resource/mcp` for an
+/// issuer at `/mcp`, never `/mcp/.well-known/...`.
+fn well_known_path(suffix: &str, prefix: &str) -> String {
+    format!("/.well-known/{suffix}{prefix}")
 }
 
 /// Resolves the incoming Bearer token to a per-user `GrampsClient` and
@@ -120,9 +150,21 @@ pub async fn identity_middleware(
 }
 
 fn unauthorized(issuer: &Url) -> Response {
-    let issuer = issuer.as_str().trim_end_matches('/');
-    let header_value =
-        format!("Bearer resource_metadata=\"{issuer}/.well-known/oauth-protected-resource\"");
+    let prefix = issuer_prefix(issuer);
+    let origin = format!(
+        "{}://{}",
+        issuer.scheme(),
+        issuer.host_str().unwrap_or_default()
+    );
+    let origin = match issuer.port() {
+        Some(port) => format!("{origin}:{port}"),
+        None => origin,
+    };
+    let resource_metadata = format!(
+        "{origin}{}",
+        well_known_path("oauth-protected-resource", &prefix)
+    );
+    let header_value = format!("Bearer resource_metadata=\"{resource_metadata}\"");
     (
         StatusCode::UNAUTHORIZED,
         [(header::WWW_AUTHENTICATE, header_value)],
