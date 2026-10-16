@@ -14,7 +14,7 @@ Create a dedicated account the MCP server will use to authenticate:
 2. Set a username and password
 3. Set the role:
    - **Editor** — full read/write access (recommended)
-   - **Viewer** — read-only; pair with `GRAMPS_READONLY=true` to also hide write tools from the AI
+   - **Member** — read-only; pair with `GRAMPS_READONLY=true` to also hide write tools from the AI. See [roles.md](roles.md) for what each role can do.
 
 ## Step 2 — Configure your AI client
 
