@@ -158,16 +158,6 @@ fn api_err(e: impl std::fmt::Display) -> Result<CallToolResult, McpError> {
     )]))
 }
 
-fn require_object(data: &serde_json::Value) -> Option<Result<CallToolResult, McpError>> {
-    if data.is_object() {
-        None
-    } else {
-        Some(Ok(CallToolResult::error(vec![ContentBlock::text(
-            "`data` must be a JSON object — pass the full object returned by get_object, not a string",
-        )])))
-    }
-}
-
 #[tool_router]
 impl GrampsMcpServer {
     // ── Search ──────────────────────────────────────────────────────────────
@@ -808,171 +798,174 @@ cross-checked against the file's actual content.")]
 
     // ── Update ──────────────────────────────────────────────────────────────
 
-    #[tool(
-        description = "Update an existing person. Pass the full object from get_person with modifications."
-    )]
+    #[tool(description = "\
+Update an existing person. Pass in `data` only the fields you want to change — every other \
+field already on the record is preserved. A list or nested object you do include (e.g. \
+`event_ref_list`, `citation_list`, `primary_name`) replaces that value as a whole rather than \
+being merged field-by-field, so to add an item to a list, fetch the current one with \
+get_object first and send back the complete list. If `data` includes `handle`, it must match \
+the `handle` argument.")]
     async fn update_person(
         &self,
         Parameters(UpdateInput { handle, data }): Parameters<UpdateInput>,
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
         let client = self.client_for(&context)?;
-        if let Some(err) = require_object(&data) {
-            return err;
-        }
         update::update_person(&client, &handle, &data)
             .await
             .map_or_else(api_err, ok_json)
     }
 
-    #[tool(
-        description = "Update an existing family. Pass the full object from get_family with modifications."
-    )]
+    #[tool(description = "\
+Update an existing family. Pass in `data` only the fields you want to change — every other \
+field already on the record is preserved. A list or nested object you do include (e.g. \
+`child_ref_list`, `note_list`) replaces that value as a whole rather than being merged \
+field-by-field, so to add an item to a list, fetch the current one with get_object first and \
+send back the complete list. If `data` includes `handle`, it must match the `handle` \
+argument.")]
     async fn update_family(
         &self,
         Parameters(UpdateInput { handle, data }): Parameters<UpdateInput>,
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
         let client = self.client_for(&context)?;
-        if let Some(err) = require_object(&data) {
-            return err;
-        }
         update::update_family(&client, &handle, &data)
             .await
             .map_or_else(api_err, ok_json)
     }
 
-    #[tool(
-        description = "Update an existing event. Pass the full object from get_event with modifications."
-    )]
+    #[tool(description = "\
+Update an existing event. Pass in `data` only the fields you want to change — every other \
+field already on the record is preserved. A list or nested object you do include (e.g. \
+`citation_list`, `attribute_list`) replaces that value as a whole rather than being merged \
+field-by-field, so to add an item to a list, fetch the current one with get_object first and \
+send back the complete list. If `data` includes `handle`, it must match the `handle` \
+argument.")]
     async fn update_event(
         &self,
         Parameters(UpdateInput { handle, data }): Parameters<UpdateInput>,
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
         let client = self.client_for(&context)?;
-        if let Some(err) = require_object(&data) {
-            return err;
-        }
         update::update_event(&client, &handle, &data)
             .await
             .map_or_else(api_err, ok_json)
     }
 
-    #[tool(
-        description = "Update an existing place. Pass the full object from get_place with modifications."
-    )]
+    #[tool(description = "\
+Update an existing place. Pass in `data` only the fields you want to change — every other \
+field already on the record is preserved. A list or nested object you do include (e.g. \
+`note_list`, `alt_names`) replaces that value as a whole rather than being merged \
+field-by-field, so to add an item to a list, fetch the current one with get_object first and \
+send back the complete list. If `data` includes `handle`, it must match the `handle` \
+argument.")]
     async fn update_place(
         &self,
         Parameters(UpdateInput { handle, data }): Parameters<UpdateInput>,
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
         let client = self.client_for(&context)?;
-        if let Some(err) = require_object(&data) {
-            return err;
-        }
         update::update_place(&client, &handle, &data)
             .await
             .map_or_else(api_err, ok_json)
     }
 
-    #[tool(
-        description = "Update an existing source. Pass the full object from get_source with modifications."
-    )]
+    #[tool(description = "\
+Update an existing source. Pass in `data` only the fields you want to change — every other \
+field already on the record is preserved. A list or nested object you do include (e.g. \
+`note_list`, `reporef_list`) replaces that value as a whole rather than being merged \
+field-by-field, so to add an item to a list, fetch the current one with get_object first and \
+send back the complete list. If `data` includes `handle`, it must match the `handle` \
+argument.")]
     async fn update_source(
         &self,
         Parameters(UpdateInput { handle, data }): Parameters<UpdateInput>,
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
         let client = self.client_for(&context)?;
-        if let Some(err) = require_object(&data) {
-            return err;
-        }
         update::update_source(&client, &handle, &data)
             .await
             .map_or_else(api_err, ok_json)
     }
 
-    #[tool(
-        description = "Update an existing citation. Pass the full object from get_citation with modifications."
-    )]
+    #[tool(description = "\
+Update an existing citation. Pass in `data` only the fields you want to change — every other \
+field already on the record is preserved. A list or nested object you do include (e.g. \
+`note_list`) replaces that value as a whole rather than being merged field-by-field, so to \
+add an item to a list, fetch the current one with get_object first and send back the \
+complete list. If `data` includes `handle`, it must match the `handle` argument.")]
     async fn update_citation(
         &self,
         Parameters(UpdateInput { handle, data }): Parameters<UpdateInput>,
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
         let client = self.client_for(&context)?;
-        if let Some(err) = require_object(&data) {
-            return err;
-        }
         update::update_citation(&client, &handle, &data)
             .await
             .map_or_else(api_err, ok_json)
     }
 
-    #[tool(
-        description = "Update an existing repository. Pass the full object from get_repository with modifications."
-    )]
+    #[tool(description = "\
+Update an existing repository. Pass in `data` only the fields you want to change — every \
+other field already on the record is preserved. A list or nested object you do include \
+replaces that value as a whole rather than being merged field-by-field, so to add an item to \
+a list, fetch the current one with get_object first and send back the complete list. If \
+`data` includes `handle`, it must match the `handle` argument.")]
     async fn update_repository(
         &self,
         Parameters(UpdateInput { handle, data }): Parameters<UpdateInput>,
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
         let client = self.client_for(&context)?;
-        if let Some(err) = require_object(&data) {
-            return err;
-        }
         update::update_repository(&client, &handle, &data)
             .await
             .map_or_else(api_err, ok_json)
     }
 
-    #[tool(
-        description = "Update an existing note. Pass the full object from get_note with modifications."
-    )]
+    #[tool(description = "\
+Update an existing note. Pass in `data` only the fields you want to change — every other \
+field already on the record is preserved. A list or nested object you do include (e.g. \
+`text`, `tag_list`) replaces that value as a whole rather than being merged field-by-field. \
+If `data` includes `handle`, it must match the `handle` argument.")]
     async fn update_note(
         &self,
         Parameters(UpdateInput { handle, data }): Parameters<UpdateInput>,
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
         let client = self.client_for(&context)?;
-        if let Some(err) = require_object(&data) {
-            return err;
-        }
         update::update_note(&client, &handle, &data)
             .await
             .map_or_else(api_err, ok_json)
     }
 
-    #[tool(
-        description = "Update an existing tag. Pass the full object from get_tag with modifications."
-    )]
+    #[tool(description = "\
+Update an existing tag. Pass in `data` only the fields you want to change — every other field \
+already on the record is preserved. If `data` includes `handle`, it must match the `handle` \
+argument.")]
     async fn update_tag(
         &self,
         Parameters(UpdateInput { handle, data }): Parameters<UpdateInput>,
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
         let client = self.client_for(&context)?;
-        if let Some(err) = require_object(&data) {
-            return err;
-        }
         update::update_tag(&client, &handle, &data)
             .await
             .map_or_else(api_err, ok_json)
     }
 
-    #[tool(
-        description = "Update an existing media object. Pass the full object from get_media with modifications."
-    )]
+    #[tool(description = "\
+Update an existing media object's metadata. Pass in `data` only the fields you want to change \
+— every other field already on the record is preserved. A list or nested object you do \
+include (e.g. `note_list`, `attribute_list`) replaces that value as a whole rather than being \
+merged field-by-field, so to add an item to a list, fetch the current one with get_object \
+first and send back the complete list. If `data` includes `handle`, it must match the \
+`handle` argument. To replace the underlying file itself, use replace_media_file instead.")]
     async fn update_media(
         &self,
         Parameters(UpdateInput { handle, data }): Parameters<UpdateInput>,
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
         let client = self.client_for(&context)?;
-        if let Some(err) = require_object(&data) {
-            return err;
-        }
         update::update_media(&client, &handle, &data)
             .await
             .map_or_else(api_err, ok_json)

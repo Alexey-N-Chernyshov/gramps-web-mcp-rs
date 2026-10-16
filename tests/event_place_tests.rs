@@ -140,3 +140,46 @@ async fn event_span_between_two_events() {
         .await
         .unwrap();
 }
+
+#[tokio::test]
+async fn partial_update_preserves_place_note_list() {
+    let fixture = common::TestFixture::new().await;
+    let client = &fixture.client;
+
+    let note_handle = create::create_note(client, "A place note", None)
+        .await
+        .unwrap();
+
+    let handle = create::create_place(
+        client,
+        CreatePlaceRequest {
+            title: Some("Moscow".to_string()),
+            name: Some(PlaceName {
+                value: Some("Moscow".to_string()),
+                ..Default::default()
+            }),
+            note_list: Some(vec![note_handle.clone()]),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    // Partial update touching only `title` must leave note_list untouched.
+    update::update_place(
+        client,
+        &handle,
+        &serde_json::json!({"title": "Saint Petersburg"}),
+    )
+    .await
+    .unwrap();
+
+    let updated = get::get_object_by_handle(client, "places", &handle)
+        .await
+        .unwrap();
+    assert_eq!(updated["title"].as_str(), Some("Saint Petersburg"));
+    assert_eq!(
+        updated["note_list"].as_array().unwrap(),
+        &vec![serde_json::json!(note_handle)]
+    );
+}

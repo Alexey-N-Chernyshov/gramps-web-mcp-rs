@@ -250,8 +250,11 @@ fn json_object_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
 #[derive(Deserialize, JsonSchema)]
 pub struct UpdateInput {
     pub handle: String,
-    /// Full object body for PUT, matching the shape returned by the corresponding get_object
-    /// call — fetch it first, then modify only the fields you need.
+    /// Only the fields to change; everything else on the record is left untouched. A list
+    /// or nested object you include replaces the existing value as a whole (not merged
+    /// field-by-field) — to add to a list, read it first via get_object and send back the
+    /// complete list. Must not be empty, and if it includes `handle`, it must match the
+    /// `handle` argument.
     /// For dates: "date": {"dateval": [day, month, year, 0], "text": null}, e.g.
     /// [15, 6, 1867, 0] for June 15, 1867. Use 0 for day/month if unknown.
     #[schemars(schema_with = "json_object_schema")]
