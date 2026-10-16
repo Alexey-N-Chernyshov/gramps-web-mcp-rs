@@ -18,8 +18,10 @@ mod common;
 use gramps_web_mcp_rs::{
     client::Error,
     models::{
+        event::CreateEventRequest,
         family::CreateFamilyRequest,
         person::{CreatePersonRequest, PersonName, Surname},
+        source::CreateSourceRequest,
     },
     tools::{create, delete, get, update},
 };
@@ -274,4 +276,218 @@ async fn relations_between_parent_and_child() {
     delete::delete_object(client, "people", &child)
         .await
         .unwrap();
+}
+
+#[tokio::test]
+async fn partial_update_preserves_unspecified_person_fields() {
+    let fixture = common::TestFixture::new().await;
+    let client = &fixture.client;
+
+    let note_handle = create::create_note(client, "A research note", None)
+        .await
+        .unwrap();
+    let source_handle = create::create_source(
+        client,
+        CreateSourceRequest {
+            title: Some("Census 1900".to_string()),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let citation_handle = create::create_citation(client, &source_handle, Some("p. 12"))
+        .await
+        .unwrap();
+    let event_handle = create::create_event(
+        client,
+        CreateEventRequest {
+            event_type: Some(serde_json::json!("Birth")),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    let handle = create::create_person(
+        client,
+        CreatePersonRequest {
+            gender: Some(1),
+            note_list: Some(vec![note_handle.clone()]),
+            citation_list: Some(vec![citation_handle.clone()]),
+            event_ref_list: Some(vec![
+                serde_json::json!({"ref": event_handle, "role": "Primary"}),
+            ]),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    // A partial update touching only `gender` must leave the other lists untouched.
+    update::update_person(client, &handle, &serde_json::json!({"gender": 2}))
+        .await
+        .unwrap();
+
+    let updated = get::get_object_by_handle(client, "people", &handle)
+        .await
+        .unwrap();
+    assert_eq!(updated["gender"].as_i64(), Some(2));
+    assert_eq!(
+        updated["note_list"].as_array().unwrap(),
+        &vec![serde_json::json!(note_handle)]
+    );
+    assert_eq!(
+        updated["citation_list"].as_array().unwrap(),
+        &vec![serde_json::json!(citation_handle)]
+    );
+    let event_refs = updated["event_ref_list"].as_array().unwrap();
+    assert_eq!(event_refs.len(), 1);
+    assert_eq!(event_refs[0]["ref"].as_str(), Some(event_handle.as_str()));
+}
+
+#[tokio::test]
+async fn partial_update_replaces_list_when_included_in_data() {
+    let fixture = common::TestFixture::new().await;
+    let client = &fixture.client;
+
+    let note1 = create::create_note(client, "First note", None)
+        .await
+        .unwrap();
+    let note2 = create::create_note(client, "Second note", None)
+        .await
+        .unwrap();
+
+    let handle = create::create_person(
+        client,
+        CreatePersonRequest {
+            note_list: Some(vec![note1.clone()]),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    update::update_person(
+        client,
+        &handle,
+        &serde_json::json!({"note_list": [note2.clone()]}),
+    )
+    .await
+    .unwrap();
+
+    let updated = get::get_object_by_handle(client, "people", &handle)
+        .await
+        .unwrap();
+    assert_eq!(
+        updated["note_list"].as_array().unwrap(),
+        &vec![serde_json::json!(note2)],
+        "note_list should be replaced wholesale, not merged with the old one"
+    );
+}
+
+#[tokio::test]
+async fn update_rejects_mismatched_handle_in_data_without_writing() {
+    let fixture = common::TestFixture::new().await;
+    let client = &fixture.client;
+
+    let handle = create::create_person(
+        client,
+        CreatePersonRequest {
+            gender: Some(1),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    let err = update::update_person(
+        client,
+        &handle,
+        &serde_json::json!({"handle": "some-other-handle", "gender": 2}),
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(err, Error::Validation(_)), "got: {err:?}");
+
+    let unchanged = get::get_object_by_handle(client, "people", &handle)
+        .await
+        .unwrap();
+    assert_eq!(
+        unchanged["gender"].as_i64(),
+        Some(1),
+        "object must be left untouched when the write is rejected"
+    );
+}
+
+#[tokio::test]
+async fn update_rejects_empty_data() {
+    let fixture = common::TestFixture::new().await;
+    let client = &fixture.client;
+
+    let handle = create::create_person(client, CreatePersonRequest::default())
+        .await
+        .unwrap();
+
+    let err = update::update_person(client, &handle, &serde_json::json!({}))
+        .await
+        .unwrap_err();
+    assert!(matches!(err, Error::Validation(_)), "got: {err:?}");
+}
+
+#[tokio::test]
+async fn partial_update_preserves_family_note_list() {
+    let fixture = common::TestFixture::new().await;
+    let client = &fixture.client;
+
+    let note_handle = create::create_note(client, "Family note", None)
+        .await
+        .unwrap();
+    let father = create::create_person(
+        client,
+        CreatePersonRequest {
+            gender: Some(1),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    let family_handle = create::create_family(
+        client,
+        CreateFamilyRequest {
+            father_handle: Some(father),
+            note_list: Some(vec![note_handle.clone()]),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    let new_father = create::create_person(
+        client,
+        CreatePersonRequest {
+            gender: Some(1),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    update::update_family(
+        client,
+        &family_handle,
+        &serde_json::json!({"father_handle": new_father}),
+    )
+    .await
+    .unwrap();
+
+    let updated = get::get_object_by_handle(client, "families", &family_handle)
+        .await
+        .unwrap();
+    assert_eq!(updated["father_handle"].as_str(), Some(new_father.as_str()));
+    assert_eq!(
+        updated["note_list"].as_array().unwrap(),
+        &vec![serde_json::json!(note_handle)],
+        "note_list should survive a partial update that only touches father_handle"
+    );
 }

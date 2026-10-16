@@ -158,16 +158,6 @@ fn api_err(e: impl std::fmt::Display) -> Result<CallToolResult, McpError> {
     )]))
 }
 
-fn require_object(data: &serde_json::Value) -> Option<Result<CallToolResult, McpError>> {
-    if data.is_object() {
-        None
-    } else {
-        Some(Ok(CallToolResult::error(vec![ContentBlock::text(
-            "`data` must be a JSON object — pass the full object returned by get_object, not a string",
-        )])))
-    }
-}
-
 #[tool_router]
 impl GrampsMcpServer {
     // ── Search ──────────────────────────────────────────────────────────────
@@ -809,7 +799,8 @@ cross-checked against the file's actual content.")]
     // ── Update ──────────────────────────────────────────────────────────────
 
     #[tool(
-        description = "Update an existing person. Pass the full object from get_person with modifications."
+        description = "Update an existing person: pass only changed fields (see server \
+instructions)."
     )]
     async fn update_person(
         &self,
@@ -817,16 +808,14 @@ cross-checked against the file's actual content.")]
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
         let client = self.client_for(&context)?;
-        if let Some(err) = require_object(&data) {
-            return err;
-        }
         update::update_person(&client, &handle, &data)
             .await
             .map_or_else(api_err, ok_json)
     }
 
     #[tool(
-        description = "Update an existing family. Pass the full object from get_family with modifications."
+        description = "Update an existing family: pass only changed fields (see server \
+instructions)."
     )]
     async fn update_family(
         &self,
@@ -834,16 +823,14 @@ cross-checked against the file's actual content.")]
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
         let client = self.client_for(&context)?;
-        if let Some(err) = require_object(&data) {
-            return err;
-        }
         update::update_family(&client, &handle, &data)
             .await
             .map_or_else(api_err, ok_json)
     }
 
     #[tool(
-        description = "Update an existing event. Pass the full object from get_event with modifications."
+        description = "Update an existing event: pass only changed fields (see server \
+instructions)."
     )]
     async fn update_event(
         &self,
@@ -851,16 +838,14 @@ cross-checked against the file's actual content.")]
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
         let client = self.client_for(&context)?;
-        if let Some(err) = require_object(&data) {
-            return err;
-        }
         update::update_event(&client, &handle, &data)
             .await
             .map_or_else(api_err, ok_json)
     }
 
     #[tool(
-        description = "Update an existing place. Pass the full object from get_place with modifications."
+        description = "Update an existing place: pass only changed fields (see server \
+instructions)."
     )]
     async fn update_place(
         &self,
@@ -868,16 +853,14 @@ cross-checked against the file's actual content.")]
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
         let client = self.client_for(&context)?;
-        if let Some(err) = require_object(&data) {
-            return err;
-        }
         update::update_place(&client, &handle, &data)
             .await
             .map_or_else(api_err, ok_json)
     }
 
     #[tool(
-        description = "Update an existing source. Pass the full object from get_source with modifications."
+        description = "Update an existing source: pass only changed fields (see server \
+instructions)."
     )]
     async fn update_source(
         &self,
@@ -885,16 +868,14 @@ cross-checked against the file's actual content.")]
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
         let client = self.client_for(&context)?;
-        if let Some(err) = require_object(&data) {
-            return err;
-        }
         update::update_source(&client, &handle, &data)
             .await
             .map_or_else(api_err, ok_json)
     }
 
     #[tool(
-        description = "Update an existing citation. Pass the full object from get_citation with modifications."
+        description = "Update an existing citation: pass only changed fields (see server \
+instructions)."
     )]
     async fn update_citation(
         &self,
@@ -902,16 +883,14 @@ cross-checked against the file's actual content.")]
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
         let client = self.client_for(&context)?;
-        if let Some(err) = require_object(&data) {
-            return err;
-        }
         update::update_citation(&client, &handle, &data)
             .await
             .map_or_else(api_err, ok_json)
     }
 
     #[tool(
-        description = "Update an existing repository. Pass the full object from get_repository with modifications."
+        description = "Update an existing repository: pass only changed fields (see server \
+instructions)."
     )]
     async fn update_repository(
         &self,
@@ -919,16 +898,14 @@ cross-checked against the file's actual content.")]
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
         let client = self.client_for(&context)?;
-        if let Some(err) = require_object(&data) {
-            return err;
-        }
         update::update_repository(&client, &handle, &data)
             .await
             .map_or_else(api_err, ok_json)
     }
 
     #[tool(
-        description = "Update an existing note. Pass the full object from get_note with modifications."
+        description = "Update an existing note: pass only changed fields (see server \
+instructions)."
     )]
     async fn update_note(
         &self,
@@ -936,16 +913,14 @@ cross-checked against the file's actual content.")]
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
         let client = self.client_for(&context)?;
-        if let Some(err) = require_object(&data) {
-            return err;
-        }
         update::update_note(&client, &handle, &data)
             .await
             .map_or_else(api_err, ok_json)
     }
 
     #[tool(
-        description = "Update an existing tag. Pass the full object from get_tag with modifications."
+        description = "Update an existing tag: pass only changed fields (see server \
+instructions)."
     )]
     async fn update_tag(
         &self,
@@ -953,16 +928,15 @@ cross-checked against the file's actual content.")]
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
         let client = self.client_for(&context)?;
-        if let Some(err) = require_object(&data) {
-            return err;
-        }
         update::update_tag(&client, &handle, &data)
             .await
             .map_or_else(api_err, ok_json)
     }
 
     #[tool(
-        description = "Update an existing media object. Pass the full object from get_media with modifications."
+        description = "Update an existing media object's metadata: pass only changed fields \
+(see server instructions). To replace the underlying file itself, use replace_media_file \
+instead."
     )]
     async fn update_media(
         &self,
@@ -970,9 +944,6 @@ cross-checked against the file's actual content.")]
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
         let client = self.client_for(&context)?;
-        if let Some(err) = require_object(&data) {
-            return err;
-        }
         update::update_media(&client, &handle, &data)
             .await
             .map_or_else(api_err, ok_json)
