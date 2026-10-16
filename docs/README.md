@@ -9,7 +9,7 @@
 
 - [Local setup (stdio)](setup-local.md) — AI client and Gramps Web on the same machine.
 - [LAN / VPN setup (HTTP)](setup-server-lan.md) — Gramps Web on a home server, reachable via LAN or VPN.
-- [Public server setup (HTTP+TLS)](setup-server-public.md) — Gramps Web exposed to the internet via reverse proxy.
+- [Public server setup (HTTPS)](setup-server-public.md) — Gramps Web exposed to the internet via reverse proxy.
 
 ## Reference
 
