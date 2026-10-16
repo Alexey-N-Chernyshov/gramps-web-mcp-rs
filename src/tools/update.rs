@@ -14,16 +14,6 @@
 
 use crate::client::{Error, GrampsClient, Result};
 
-/// Read-modify-write a top-level patch onto the object at `/api/{endpoint}/{handle}`.
-///
-/// Gramps Web's PUT replaces the object wholesale, so sending just the fields the caller
-/// wants to change would silently drop everything else (citation_list, note_list, ...).
-/// This fetches the current object first and overlays `data`'s top-level keys onto it
-/// before writing it back. The merge is shallow by design: a list or nested object in
-/// `data` replaces the corresponding value whole, rather than being merged recursively,
-/// so callers get predictable behavior instead of surprising deep-merge semantics.
-///
-/// There is an inherent GET/PUT race: a concurrent write between the two could be lost.
 fn validate_patch<'a>(
     data: &'a serde_json::Value,
     handle: &str,
@@ -51,6 +41,16 @@ fn validate_patch<'a>(
     Ok(patch)
 }
 
+/// Read-modify-write a top-level patch onto the object at `/api/{endpoint}/{handle}`.
+///
+/// Gramps Web's PUT replaces the object wholesale, so sending just the fields the caller
+/// wants to change would silently drop everything else (citation_list, note_list, ...).
+/// This fetches the current object first and overlays `data`'s top-level keys onto it
+/// before writing it back. The merge is shallow by design: a list or nested object in
+/// `data` replaces the corresponding value whole, rather than being merged recursively,
+/// so callers get predictable behavior instead of surprising deep-merge semantics.
+///
+/// There is an inherent GET/PUT race: a concurrent write between the two could be lost.
 async fn update_with_merge(
     client: &GrampsClient,
     endpoint: &str,

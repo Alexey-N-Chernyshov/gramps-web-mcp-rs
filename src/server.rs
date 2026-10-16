@@ -798,13 +798,10 @@ cross-checked against the file's actual content.")]
 
     // ── Update ──────────────────────────────────────────────────────────────
 
-    #[tool(description = "\
-Update an existing person. Pass in `data` only the fields you want to change — every other \
-field already on the record is preserved. A list or nested object you do include (e.g. \
-`event_ref_list`, `citation_list`, `primary_name`) replaces that value as a whole rather than \
-being merged field-by-field, so to add an item to a list, fetch the current one with \
-get_object first and send back the complete list. If `data` includes `handle`, it must match \
-the `handle` argument.")]
+    #[tool(
+        description = "Update an existing person: pass only changed fields (see server \
+instructions)."
+    )]
     async fn update_person(
         &self,
         Parameters(UpdateInput { handle, data }): Parameters<UpdateInput>,
@@ -816,13 +813,10 @@ the `handle` argument.")]
             .map_or_else(api_err, ok_json)
     }
 
-    #[tool(description = "\
-Update an existing family. Pass in `data` only the fields you want to change — every other \
-field already on the record is preserved. A list or nested object you do include (e.g. \
-`child_ref_list`, `note_list`) replaces that value as a whole rather than being merged \
-field-by-field, so to add an item to a list, fetch the current one with get_object first and \
-send back the complete list. If `data` includes `handle`, it must match the `handle` \
-argument.")]
+    #[tool(
+        description = "Update an existing family: pass only changed fields (see server \
+instructions)."
+    )]
     async fn update_family(
         &self,
         Parameters(UpdateInput { handle, data }): Parameters<UpdateInput>,
@@ -834,13 +828,10 @@ argument.")]
             .map_or_else(api_err, ok_json)
     }
 
-    #[tool(description = "\
-Update an existing event. Pass in `data` only the fields you want to change — every other \
-field already on the record is preserved. A list or nested object you do include (e.g. \
-`citation_list`, `attribute_list`) replaces that value as a whole rather than being merged \
-field-by-field, so to add an item to a list, fetch the current one with get_object first and \
-send back the complete list. If `data` includes `handle`, it must match the `handle` \
-argument.")]
+    #[tool(
+        description = "Update an existing event: pass only changed fields (see server \
+instructions)."
+    )]
     async fn update_event(
         &self,
         Parameters(UpdateInput { handle, data }): Parameters<UpdateInput>,
@@ -852,13 +843,10 @@ argument.")]
             .map_or_else(api_err, ok_json)
     }
 
-    #[tool(description = "\
-Update an existing place. Pass in `data` only the fields you want to change — every other \
-field already on the record is preserved. A list or nested object you do include (e.g. \
-`note_list`, `alt_names`) replaces that value as a whole rather than being merged \
-field-by-field, so to add an item to a list, fetch the current one with get_object first and \
-send back the complete list. If `data` includes `handle`, it must match the `handle` \
-argument.")]
+    #[tool(
+        description = "Update an existing place: pass only changed fields (see server \
+instructions)."
+    )]
     async fn update_place(
         &self,
         Parameters(UpdateInput { handle, data }): Parameters<UpdateInput>,
@@ -870,13 +858,10 @@ argument.")]
             .map_or_else(api_err, ok_json)
     }
 
-    #[tool(description = "\
-Update an existing source. Pass in `data` only the fields you want to change — every other \
-field already on the record is preserved. A list or nested object you do include (e.g. \
-`note_list`, `reporef_list`) replaces that value as a whole rather than being merged \
-field-by-field, so to add an item to a list, fetch the current one with get_object first and \
-send back the complete list. If `data` includes `handle`, it must match the `handle` \
-argument.")]
+    #[tool(
+        description = "Update an existing source: pass only changed fields (see server \
+instructions)."
+    )]
     async fn update_source(
         &self,
         Parameters(UpdateInput { handle, data }): Parameters<UpdateInput>,
@@ -888,12 +873,10 @@ argument.")]
             .map_or_else(api_err, ok_json)
     }
 
-    #[tool(description = "\
-Update an existing citation. Pass in `data` only the fields you want to change — every other \
-field already on the record is preserved. A list or nested object you do include (e.g. \
-`note_list`) replaces that value as a whole rather than being merged field-by-field, so to \
-add an item to a list, fetch the current one with get_object first and send back the \
-complete list. If `data` includes `handle`, it must match the `handle` argument.")]
+    #[tool(
+        description = "Update an existing citation: pass only changed fields (see server \
+instructions)."
+    )]
     async fn update_citation(
         &self,
         Parameters(UpdateInput { handle, data }): Parameters<UpdateInput>,
@@ -905,12 +888,10 @@ complete list. If `data` includes `handle`, it must match the `handle` argument.
             .map_or_else(api_err, ok_json)
     }
 
-    #[tool(description = "\
-Update an existing repository. Pass in `data` only the fields you want to change — every \
-other field already on the record is preserved. A list or nested object you do include \
-replaces that value as a whole rather than being merged field-by-field, so to add an item to \
-a list, fetch the current one with get_object first and send back the complete list. If \
-`data` includes `handle`, it must match the `handle` argument.")]
+    #[tool(
+        description = "Update an existing repository: pass only changed fields (see server \
+instructions)."
+    )]
     async fn update_repository(
         &self,
         Parameters(UpdateInput { handle, data }): Parameters<UpdateInput>,
@@ -922,11 +903,10 @@ a list, fetch the current one with get_object first and send back the complete l
             .map_or_else(api_err, ok_json)
     }
 
-    #[tool(description = "\
-Update an existing note. Pass in `data` only the fields you want to change — every other \
-field already on the record is preserved. A list or nested object you do include (e.g. \
-`text`, `tag_list`) replaces that value as a whole rather than being merged field-by-field. \
-If `data` includes `handle`, it must match the `handle` argument.")]
+    #[tool(
+        description = "Update an existing note: pass only changed fields (see server \
+instructions)."
+    )]
     async fn update_note(
         &self,
         Parameters(UpdateInput { handle, data }): Parameters<UpdateInput>,
@@ -938,10 +918,10 @@ If `data` includes `handle`, it must match the `handle` argument.")]
             .map_or_else(api_err, ok_json)
     }
 
-    #[tool(description = "\
-Update an existing tag. Pass in `data` only the fields you want to change — every other field \
-already on the record is preserved. If `data` includes `handle`, it must match the `handle` \
-argument.")]
+    #[tool(
+        description = "Update an existing tag: pass only changed fields (see server \
+instructions)."
+    )]
     async fn update_tag(
         &self,
         Parameters(UpdateInput { handle, data }): Parameters<UpdateInput>,
@@ -953,13 +933,11 @@ argument.")]
             .map_or_else(api_err, ok_json)
     }
 
-    #[tool(description = "\
-Update an existing media object's metadata. Pass in `data` only the fields you want to change \
-— every other field already on the record is preserved. A list or nested object you do \
-include (e.g. `note_list`, `attribute_list`) replaces that value as a whole rather than being \
-merged field-by-field, so to add an item to a list, fetch the current one with get_object \
-first and send back the complete list. If `data` includes `handle`, it must match the \
-`handle` argument. To replace the underlying file itself, use replace_media_file instead.")]
+    #[tool(
+        description = "Update an existing media object's metadata: pass only changed fields \
+(see server instructions). To replace the underlying file itself, use replace_media_file \
+instead."
+    )]
     async fn update_media(
         &self,
         Parameters(UpdateInput { handle, data }): Parameters<UpdateInput>,
