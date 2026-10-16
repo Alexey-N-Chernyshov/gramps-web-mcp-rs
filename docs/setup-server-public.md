@@ -13,7 +13,7 @@ Use HTTPS on the standard port 443 — some MCP clients won't accept any other p
 Pick **one** — not both:
 
 - **OAuth** — each person signs in with their own Gramps Web account; requires a stable HTTPS domain (`MCP_OAUTH_PUBLIC_URL` must be `https://`). No account to create here.
-- **Static token** — one shared Gramps Web service account for everyone; doesn't need a domain itself (it also works without one, e.g. the [LAN/VPN setup](setup-server-lan.md)). Create that account now: role Editor for normal use, Member for read-only (pair with `GRAMPS_READONLY=true`); never Owner or Admin — see [roles.md](roles.md).
+- **Static token** — one shared Gramps Web service account for everyone. Create that account now: role Editor for normal use, Member for read-only (pair with `GRAMPS_READONLY=true`); never Owner or Admin — see [roles.md](roles.md).
 
 ## 2. Choose a layout
 
@@ -48,18 +48,12 @@ Add the variables for whichever auth mode you picked in step 1:
 ```yaml
     MCP_OAUTH_ENABLED: "true"
     MCP_OAUTH_STORAGE_KEY: <openssl rand -base64 32>
-    MCP_OAUTH_STORAGE_PATH: /data/oauth_store.json
     MCP_OAUTH_PUBLIC_URL: https://gramps-mcp.example.com
   volumes:
     - gramps_mcp_oauth:/data
 ```
 
-And, at the top level of the compose file: `volumes: { gramps_mcp_oauth: }`. Before the first start, make that volume writable by the image's non-root user (uid 100, gid 101) — otherwise sessions are lost every time the container is recreated:
-
-```bash
-docker volume create gramps_mcp_oauth
-docker run --rm -v gramps_mcp_oauth:/data alpine chown 100:101 /data
-```
+And, at the top level of the compose file: `volumes: { gramps_mcp_oauth: }`. Mount a named volume at `/data` so sessions survive container recreation.
 
 ### Auth: static token
 
@@ -84,7 +78,7 @@ gramps-mcp:
     MCP_TRANSPORT: http
     MCP_HTTP_PORT: 3000
     MCP_ALLOWED_HOSTS: gramps.example.com
-    VIRTUAL_HOST: gramps.example.com   # same host as grampsweb
+    VIRTUAL_HOST: gramps.example.com # same host as grampsweb
     VIRTUAL_PATH: /mcp
     VIRTUAL_PORT: "3000"
   networks:
@@ -101,14 +95,13 @@ OAuth also needs its two discovery documents reachable at the host root (see [en
 ```yaml
     MCP_OAUTH_ENABLED: "true"
     MCP_OAUTH_STORAGE_KEY: <openssl rand -base64 32>
-    MCP_OAUTH_STORAGE_PATH: /data/oauth_store.json
     MCP_OAUTH_PUBLIC_URL: https://gramps.example.com/mcp
     VIRTUAL_PATH: ~^/(mcp(/.*)?|\.well-known/oauth-(protected-resource|authorization-server)/mcp)$
   volumes:
     - gramps_mcp_oauth:/data
 ```
 
-Same top-level volume and one-time ownership fix as in [Own subdomain](#own-subdomain).
+Same top-level volume as in [Own subdomain](#own-subdomain) — mount it at `/data` so sessions survive container recreation.
 
 If you're hand-writing nginx config instead of relying on `nginx-proxy`'s templating, the equivalent is:
 

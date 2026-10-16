@@ -51,7 +51,7 @@ fn default_max_media_bytes() -> u64 {
 }
 
 fn default_oauth_storage_path() -> String {
-    "./oauth_store.json".to_string()
+    "/data/oauth_store.json".to_string()
 }
 
 #[derive(Debug, Deserialize, Clone)]
