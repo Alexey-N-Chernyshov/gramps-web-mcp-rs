@@ -37,4 +37,4 @@ Where these mount depends on the path component of `MCP_OAUTH_PUBLIC_URL`. `/mcp
 
 - **Authorization code:** 60 seconds, single use.
 - **Access token:** 15 minutes.
-- **Refresh token:** rotates on every use (old one stops working immediately, OAuth 2.1-style); has no fixed expiry of its own — it stays valid as long as the underlying Gramps Web refresh token does, and dies when Gramps rejects that token (e.g. the user's Gramps Web refresh token expired or was revoked, or Gramps Web's `SECRET_KEY` changed).
+- **Refresh token:** rotates on every use (old one stops working immediately, OAuth 2.1-style); has no fixed expiry of its own. The underlying Gramps Web refresh token it's tied to doesn't expire on its own by default either (`JWT_REFRESH_TOKEN_EXPIRES=False` in `gramps-web-api`) — it dies only when Gramps Web rejects it: the user's account was deleted or disabled, or Gramps Web's `SECRET_KEY` changed. See [security.md](security.md#oauth-details) for what each of those actually does.

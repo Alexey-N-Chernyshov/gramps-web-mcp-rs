@@ -21,5 +21,5 @@
 ## Explanation
 
 - [Alternatives](https://github.com/Alexey-N-Chernyshov/gramps-web-mcp-rs/wiki/Alternatives) (wiki) — how this compares to other options.
-- Security — coming soon.
+- [Security](security.md) — auth modes, network exposure, OAuth storage key.
 - Design decisions (wiki) — coming soon.

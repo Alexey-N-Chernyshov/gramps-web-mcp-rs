@@ -34,4 +34,4 @@ Just you → one shared Gramps Web service account and a static token is enough.
 - Just trying it out → [Quickstart](https://github.com/Alexey-N-Chernyshov/gramps-web-mcp-rs/wiki/Quickstart) (wiki).
 - Single user, client on the same machine → Local.
 - Needs internet access, or several users → Public, with OAuth on its own subdomain.
-- Details on auth modes → `security.md`, all variables → [configuration.md](configuration.md).
+- Details on auth modes → [security.md](security.md), all variables → [configuration.md](configuration.md).
