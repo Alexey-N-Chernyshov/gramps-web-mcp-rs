@@ -99,19 +99,23 @@ pub async fn get_object(
 
 /// Extra query options shared by every read path (`get_object`'s handle/gramps_id lookups
 /// and `list_objects`'s collection browse) on top of their own structural parameters
-/// (gramps_id/rules/page/pagesize). `keys`/`strip` today; expected growth spot for
-/// `profile`/`handles`/`sort` — add a field here and a branch in `query_params`, not a new
-/// parameter on every function below.
+/// (gramps_id/rules/page/pagesize). `keys`/`strip`/`profile` today; expected growth spot for
+/// `handles`/`sort` — add a field here and a branch in `query_params`, not a new parameter
+/// on every function below.
 #[derive(Default, Clone, Copy)]
 pub struct ReadOptions<'a> {
     pub keys: Option<&'a [String]>,
     pub strip: Option<bool>,
+    pub profile: Option<&'a [String]>,
 }
 
 impl ReadOptions<'_> {
     fn query_params(&self) -> Vec<String> {
         let mut params = Vec::new();
-        if let Some(kp) = keys_param(self.keys) {
+        if let Some(pp) = csv_param("profile", self.profile) {
+            params.push(pp);
+        }
+        if let Some(kp) = csv_param("keys", self.effective_keys().as_deref()) {
             params.push(kp);
         }
         if self.strip == Some(true) {
@@ -119,18 +123,35 @@ impl ReadOptions<'_> {
         }
         params
     }
+
+    /// Gramps Web applies `keys` *after* adding `profile` to the object, so a `keys` list
+    /// that omits `"profile"` silently strips the profile summary right back out. If both
+    /// are set and `keys` doesn't already mention `"profile"`, add it — the request asked
+    /// for a profile, so it should actually come back.
+    fn effective_keys(&self) -> Option<std::borrow::Cow<'_, [String]>> {
+        let keys = self.keys.filter(|k| !k.is_empty())?;
+        let wants_profile = self.profile.is_some_and(|p| !p.is_empty());
+        if wants_profile && !keys.iter().any(|k| k == "profile") {
+            let mut with_profile = keys.to_vec();
+            with_profile.push("profile".to_string());
+            Some(std::borrow::Cow::Owned(with_profile))
+        } else {
+            Some(std::borrow::Cow::Borrowed(keys))
+        }
+    }
 }
 
-/// Builds a `keys=a,b,c` query parameter (each element URL-encoded individually, joined with
-/// a literal comma) — the Gramps Web convention for restricting a response to a set of
-/// top-level fields. `None` for no `keys` argument, or an empty list (nothing left to ask
-/// for), so the caller omits the parameter entirely rather than sending `keys=`.
-fn keys_param(keys: Option<&[String]>) -> Option<String> {
-    let keys = keys.filter(|k| !k.is_empty())?;
+/// Builds a `{name}=a,b,c` query parameter (each element URL-encoded individually, joined
+/// with a literal comma) — the Gramps Web convention for list-valued query parameters like
+/// `keys` and `profile`. `None`, or an empty list (nothing to ask for), omits the parameter
+/// entirely rather than sending `{name}=`.
+fn csv_param(name: &str, values: Option<&[String]>) -> Option<String> {
+    let values = values.filter(|v| !v.is_empty())?;
     Some(format!(
-        "keys={}",
-        keys.iter()
-            .map(|k| urlencoding::encode(k))
+        "{name}={}",
+        values
+            .iter()
+            .map(|v| urlencoding::encode(v))
             .collect::<Vec<_>>()
             .join(",")
     ))
@@ -282,28 +303,40 @@ mod tests {
     }
 
     #[test]
-    fn keys_param_none_omits_the_parameter() {
-        assert_eq!(keys_param(None), None);
+    fn csv_param_none_omits_the_parameter() {
+        assert_eq!(csv_param("keys", None), None);
     }
 
     #[test]
-    fn keys_param_empty_slice_omits_the_parameter() {
-        assert_eq!(keys_param(Some(&[])), None);
+    fn csv_param_empty_slice_omits_the_parameter() {
+        assert_eq!(csv_param("keys", Some(&[])), None);
     }
 
     #[test]
-    fn keys_param_joins_and_encodes_each_element() {
+    fn csv_param_joins_and_encodes_each_element() {
         let keys = vec!["gramps_id".to_string(), "primary_name".to_string()];
         assert_eq!(
-            keys_param(Some(&keys)),
+            csv_param("keys", Some(&keys)),
             Some("keys=gramps_id,primary_name".to_string())
         );
     }
 
     #[test]
-    fn keys_param_url_encodes_special_characters_per_element() {
+    fn csv_param_url_encodes_special_characters_per_element() {
         let keys = vec!["a b".to_string(), "c".to_string()];
-        assert_eq!(keys_param(Some(&keys)), Some("keys=a%20b,c".to_string()));
+        assert_eq!(
+            csv_param("keys", Some(&keys)),
+            Some("keys=a%20b,c".to_string())
+        );
+    }
+
+    #[test]
+    fn csv_param_uses_the_given_name() {
+        let values = vec!["self".to_string()];
+        assert_eq!(
+            csv_param("profile", Some(&values)),
+            Some("profile=self".to_string())
+        );
     }
 
     #[test]
@@ -341,10 +374,72 @@ mod tests {
         let opts = ReadOptions {
             keys: Some(&keys),
             strip: Some(true),
+            ..Default::default()
         };
         assert_eq!(
             opts.query_params(),
             vec!["keys=gramps_id".to_string(), "strip=true".to_string()]
+        );
+    }
+
+    #[test]
+    fn read_options_profile_adds_profile_param() {
+        let profile = vec!["self".to_string()];
+        let opts = ReadOptions {
+            profile: Some(&profile),
+            ..Default::default()
+        };
+        assert_eq!(opts.query_params(), vec!["profile=self".to_string()]);
+    }
+
+    #[test]
+    fn read_options_profile_without_keys_does_not_add_keys_param() {
+        let profile = vec!["self".to_string()];
+        let opts = ReadOptions {
+            profile: Some(&profile),
+            ..Default::default()
+        };
+        assert!(
+            !opts.query_params().iter().any(|p| p.starts_with("keys=")),
+            "no `keys` was requested, so none should be added just because `profile` was"
+        );
+    }
+
+    #[test]
+    fn read_options_profile_plus_keys_without_profile_adds_it_to_keys() {
+        let profile = vec!["self".to_string()];
+        let keys = vec!["gramps_id".to_string()];
+        let opts = ReadOptions {
+            keys: Some(&keys),
+            profile: Some(&profile),
+            ..Default::default()
+        };
+        assert_eq!(
+            opts.query_params(),
+            vec![
+                "profile=self".to_string(),
+                "keys=gramps_id,profile".to_string(),
+            ],
+            "keys omitted \"profile\", so Gramps Web would strip the profile summary \
+             right back out unless it's added automatically"
+        );
+    }
+
+    #[test]
+    fn read_options_profile_plus_keys_already_containing_profile_is_not_duplicated() {
+        let profile = vec!["self".to_string()];
+        let keys = vec!["gramps_id".to_string(), "profile".to_string()];
+        let opts = ReadOptions {
+            keys: Some(&keys),
+            profile: Some(&profile),
+            ..Default::default()
+        };
+        assert_eq!(
+            opts.query_params(),
+            vec![
+                "profile=self".to_string(),
+                "keys=gramps_id,profile".to_string(),
+            ]
         );
     }
 

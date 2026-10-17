@@ -544,6 +544,7 @@ async fn list_objects_with_rules_keys_and_strip_combined() {
         get::ReadOptions {
             keys: Some(&keys),
             strip: Some(true),
+            ..Default::default()
         },
     )
     .await
@@ -568,6 +569,165 @@ async fn list_objects_with_rules_keys_and_strip_combined() {
     );
     assert!(item.get("gramps_id").is_some(), "got {item}");
     assert!(item.get("primary_name").is_some(), "got {item}");
+
+    delete::delete_object(client, "people", &handle)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn get_object_by_handle_with_profile_self_includes_name_birth_death() {
+    let fixture = common::TestFixture::new().await;
+    let client = &fixture.client;
+
+    let handle = create::create_person(
+        client,
+        CreatePersonRequest {
+            primary_name: Some(PersonName {
+                first_name: Some("ProfileTest".to_string()),
+                ..Default::default()
+            }),
+            gender: Some(1),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    let profile_sections = vec!["self".to_string()];
+    let obj = get::get_object_by_handle(
+        client,
+        "people",
+        &handle,
+        get::ReadOptions {
+            profile: Some(&profile_sections),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    let profile = obj
+        .get("profile")
+        .expect("profile=[\"self\"] should add a `profile` field")
+        .as_object()
+        .expect("profile should be an object");
+    assert_eq!(
+        profile.get("name_given").and_then(|v| v.as_str()),
+        Some("ProfileTest"),
+        "got profile: {profile:?}"
+    );
+    assert_eq!(
+        profile.get("sex").and_then(|v| v.as_str()),
+        Some("M"),
+        "got profile: {profile:?}"
+    );
+    assert!(
+        profile.contains_key("birth") && profile.contains_key("death"),
+        "self profile should include birth/death summaries, got {profile:?}"
+    );
+
+    delete::delete_object(client, "people", &handle)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn get_object_by_handle_with_keys_and_profile_includes_both() {
+    let fixture = common::TestFixture::new().await;
+    let client = &fixture.client;
+
+    let handle = create::create_person(client, CreatePersonRequest::default())
+        .await
+        .unwrap();
+
+    let keys = vec!["gramps_id".to_string()];
+    let profile_sections = vec!["self".to_string()];
+    let obj = get::get_object_by_handle(
+        client,
+        "people",
+        &handle,
+        get::ReadOptions {
+            keys: Some(&keys),
+            profile: Some(&profile_sections),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    assert!(
+        obj.get("gramps_id").is_some(),
+        "requested key gramps_id missing, got {obj}"
+    );
+    assert!(
+        obj.get("profile").is_some(),
+        "keys=[\"gramps_id\"] (without \"profile\") must not silently strip the requested \
+         profile summary back out, got {obj}"
+    );
+    let fields: Vec<&str> = obj
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert!(
+        fields.iter().all(|f| *f == "gramps_id" || *f == "profile"),
+        "response should only contain the requested key plus the auto-added profile, got {fields:?}"
+    );
+
+    delete::delete_object(client, "people", &handle)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn list_objects_with_rules_and_profile() {
+    let fixture = common::TestFixture::new().await;
+    let client = &fixture.client;
+
+    let handle = create::create_person(
+        client,
+        CreatePersonRequest {
+            primary_name: Some(PersonName {
+                first_name: Some("ListProfileTest".to_string()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let full = get::get_object_by_handle(client, "people", &handle, get::ReadOptions::default())
+        .await
+        .unwrap();
+    let gramps_id = full["gramps_id"].as_str().expect("gramps_id missing");
+
+    let rules = matches_query_rule(&format!(r#"gramps_id == "{gramps_id}""#));
+    let profile_sections = vec!["self".to_string()];
+    let result = get::get_object_collection(
+        client,
+        "people",
+        None,
+        Some(&rules),
+        None,
+        None,
+        get::ReadOptions {
+            profile: Some(&profile_sections),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    let items = result.as_array().expect("expected an array");
+    assert_eq!(items.len(), 1);
+    assert_eq!(
+        items[0]["profile"]["name_given"].as_str(),
+        Some("ListProfileTest"),
+        "got {}",
+        items[0]
+    );
 
     delete::delete_object(client, "people", &handle)
         .await

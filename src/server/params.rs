@@ -90,6 +90,37 @@ impl ObjectType {
     }
 }
 
+#[derive(Deserialize, JsonSchema, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ProfileSection {
+    All,
+    #[serde(rename = "self")]
+    SelfSummary,
+    Families,
+    Events,
+    Age,
+    Span,
+    Ratings,
+    References,
+    Participants,
+}
+
+impl ProfileSection {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::SelfSummary => "self",
+            Self::Families => "families",
+            Self::Events => "events",
+            Self::Age => "age",
+            Self::Span => "span",
+            Self::Ratings => "ratings",
+            Self::References => "references",
+            Self::Participants => "participants",
+        }
+    }
+}
+
 #[derive(Deserialize, JsonSchema)]
 pub struct SearchInput {
     pub query: String,
@@ -115,6 +146,8 @@ pub struct GetObjectInput {
     pub keys: Option<Vec<String>>,
     /// If true, drop empty-valued fields (empty lists/strings, null dates) from the response.
     pub strip: Option<bool>,
+    /// Adds a pre-formatted `profile` summary; "self" is usually enough for lists.
+    pub profile: Option<Vec<ProfileSection>>,
 }
 
 #[derive(Deserialize, JsonSchema, Debug)]
@@ -139,6 +172,8 @@ pub struct ListObjectsInput {
     pub keys: Option<Vec<String>>,
     /// If true, drop empty-valued fields (empty lists/strings, null dates) from each object.
     pub strip: Option<bool>,
+    /// Adds a pre-formatted `profile` summary to each object; "self" is usually enough for lists.
+    pub profile: Option<Vec<ProfileSection>>,
 }
 
 #[derive(Deserialize, JsonSchema, Debug)]

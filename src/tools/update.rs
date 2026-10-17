@@ -41,10 +41,11 @@ fn validate_patch<'a>(
     Ok(patch)
 }
 
-/// The URL for update's own read-modify-write GET — deliberately never takes `keys`/`strip`
-/// (see `fetch_path_has_no_query_params` below): any such filter would hand `current_obj`
-/// an incomplete object, and the PUT that follows replaces the record wholesale, so
-/// whatever the GET left out is gone for good.
+/// The URL for update's own read-modify-write GET — deliberately never takes
+/// `keys`/`strip`/`profile` (see `fetch_path_has_no_query_params` below): any such filter
+/// would hand `current_obj` an incomplete object, and the PUT that follows replaces the
+/// record wholesale, so whatever the GET left out is gone for good. `profile` specifically
+/// is a read-only, server-computed summary — it must never round-trip into a PUT body.
 fn fetch_path(endpoint: &str, handle: &str) -> String {
     format!("/api/{endpoint}/{handle}")
 }

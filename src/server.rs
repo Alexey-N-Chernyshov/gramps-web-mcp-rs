@@ -29,7 +29,7 @@ use params::{
     CreatePersonInput, CreatePlaceInput, CreateRepositoryInput, CreateSourceInput, CreateTagInput,
     DeleteObjectInput, GetMediaFileInput, GetObjectInput, HandleInput, HandlePairInput,
     ListObjectsInput, MergeFamilyInput, MergeInput, MergePersonInput, ObjectTypeInput,
-    QueryObjectInput, ReplaceMediaFileInput, SearchInput, UpdateInput,
+    ProfileSection, QueryObjectInput, ReplaceMediaFileInput, SearchInput, UpdateInput,
 };
 use rmcp::{
     handler::server::{
@@ -158,6 +158,12 @@ fn api_err(e: impl std::fmt::Display) -> Result<CallToolResult, McpError> {
     )]))
 }
 
+/// `get::ReadOptions::profile` wants plain strings (it's below the typed `ProfileSection`
+/// enum, like `object_type.as_endpoint()`), so convert once at this boundary.
+fn profile_strings(profile: Option<Vec<ProfileSection>>) -> Option<Vec<String>> {
+    profile.map(|sections| sections.iter().map(|s| s.as_str().to_string()).collect())
+}
+
 #[tool_router]
 impl GrampsMcpServer {
     // ── Search ──────────────────────────────────────────────────────────────
@@ -245,6 +251,7 @@ or `query_object` instead.")]
             gramps_id,
             keys,
             strip,
+            profile,
         }): Parameters<GetObjectInput>,
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
@@ -260,9 +267,11 @@ or `query_object` instead.")]
             Ok(lookup) => lookup,
             Err(msg) => return Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
         };
+        let profile = profile_strings(profile);
         let opts = get::ReadOptions {
             keys: keys.as_deref(),
             strip,
+            profile: profile.as_deref(),
         };
         get::get_object(&client, endpoint, lookup, opts)
             .await
@@ -285,6 +294,7 @@ Use `page`/`pagesize` to paginate (default page=1, pagesize=20).")]
             pagesize,
             keys,
             strip,
+            profile,
         }): Parameters<ListObjectsInput>,
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
@@ -295,9 +305,11 @@ Use `page`/`pagesize` to paginate (default page=1, pagesize=20).")]
                  \"person\", \"family\", \"event\", \"place\", \"note\", \"citation\", \"source\", \"media\", \"repository\", \"tag\"",
             )]));
         };
+        let profile = profile_strings(profile);
         let opts = get::ReadOptions {
             keys: keys.as_deref(),
             strip,
+            profile: profile.as_deref(),
         };
         get::get_object_collection(
             &client,

@@ -19,8 +19,10 @@ pulling full objects you don't need. `get_object` and `list_objects` take
 `"primary_name"`, not `"primary_name.first_name"`) — a requested nested
 field still comes back whole. Both also take `strip: true` to drop
 empty-valued fields (empty lists/strings, null dates) from the response,
-which combines with `keys`. Once you have a `handle` or `gramps_id`, read
-the full record with `get_object`.
+which combines with `keys`. For overview listings of people, prefer
+`profile: ["self"]` together with `keys: ["gramps_id", "parent_family_list"]`
+over full objects. Once you have a `handle` or `gramps_id`, read the full
+record with `get_object`.
 
 `update_*` tools do a shallow merge: pass in `data` only the fields you
 want to change, and every other field already on the record is preserved.
