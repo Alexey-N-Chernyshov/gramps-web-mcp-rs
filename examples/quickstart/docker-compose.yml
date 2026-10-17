@@ -55,7 +55,7 @@ services:
     command: celery -A gramps_webapi.celery worker --loglevel=INFO --concurrency=1
 
   grampsweb_redis:
-    image: docker.io/valkey/valkey:8-alpine
+    image: docker.io/valkey/valkey:9-alpine
     restart: unless-stopped
 
   grampsweb_init:
