@@ -24,6 +24,17 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+
+      # Backgrounded (not awaited here) so the image pull + container creation overlaps with
+      # the toolchain/cache/build steps below instead of blocking in front of them. `nohup`
+      # keeps it alive past this step's own shell exiting; the PID file lets a later step
+      # (which runs in a fresh shell — bash's own `wait` can't reach across that) poll for it
+      # to finish instead.
+      - name: Start Gramps Web test stack (background)
+        run: |
+          nohup docker compose -f docker-compose.test.yml up -d > compose.log 2>&1 &
+          echo $! > compose-up.pid
+
       - name: Install Rust toolchain
         run: rustup toolchain install stable --profile minimal --component llvm-tools-preview
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -33,9 +44,32 @@ jobs:
         with:
           tool: cargo-llvm-cov
 
-      - name: Start Gramps Web test stack
+      # Builds under coverage instrumentation while the stack above starts up, and persists
+      # `show-env`'s variables to $GITHUB_ENV so "Run coverage" (a fresh shell) reuses this
+      # exact build instead of re-deriving the environment and recompiling.
+      - name: Build tests under coverage instrumentation
         run: |
-          docker compose -f docker-compose.test.yml up -d
+          # $GITHUB_ENV doesn't unquote values like a shell would, so strip show-env's
+          # quotes here. One call, reused for both export and $GITHUB_ENV, since calling
+          # show-env again in this shell triggers its own "nested show-env" warning.
+          show_env=$(cargo llvm-cov show-env)
+          while IFS= read -r line; do
+            key=${line%%=*}
+            value=${line#*=}
+            value=${value#\'}
+            value=${value%\'}
+            export "${key}=${value}"
+            echo "${key}=${value}" >> "$GITHUB_ENV"
+          done <<< "$show_env"
+
+          cargo llvm-cov clean --workspace
+          cargo build --lib --bins --tests
+
+      - name: Wait for the Gramps Web test stack
+        run: |
+          pid=$(cat compose-up.pid)
+          while kill -0 "$pid" 2>/dev/null; do sleep 1; done
+
           port=$(docker compose -f docker-compose.test.yml port grampsweb-test 5000 | cut -d: -f2)
           for _ in $(seq 1 60); do
             code=$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:$port/api/metadata/") || true
@@ -44,13 +78,16 @@ jobs:
           done
           if [ "$code" = "000" ]; then
             echo "::error::Gramps Web test stack did not respond within 60 seconds"
+            cat compose.log
             docker compose -f docker-compose.test.yml logs
             exit 1
           fi
           echo "GRAMPS_TEST_URL=http://localhost:$port" >> "$GITHUB_ENV"
 
       - name: Run coverage
-        run: cargo llvm-cov --lib --bins --tests --lcov --output-path lcov.info
+        run: |
+          cargo test --lib --bins --tests
+          cargo llvm-cov report --lcov --output-path lcov.info
 
       - name: Stop Gramps Web test stack
         if: always()
