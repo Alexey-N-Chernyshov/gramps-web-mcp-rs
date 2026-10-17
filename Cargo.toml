@@ -81,3 +81,4 @@ testcontainers = { version = "0.28", features = [
     "docker-compose",
 ] }
 serial_test = "4"
+rmcp = { version = "3.5", features = ["client"] }
