@@ -44,10 +44,28 @@ jobs:
         with:
           tool: cargo-llvm-cov
 
+      # Builds/runs via plain `cargo test` (coverage-instrumented through show-env's exported
+      # RUSTC_WRAPPER etc.), not `cargo llvm-cov --lib --bins --tests` directly: that writes
+      # to a nested target/llvm-cov-target/ that rust-cache's restore doesn't make reusable
+      # across runs — every run recompiles every dependency from scratch despite a cache hit.
+      # Plain `cargo test` builds into the ordinary target/debug/ instead, which does get
+      # reused. `cargo llvm-cov report` only turns the resulting profile data into lcov.info;
+      # it doesn't build or run anything itself.
       - name: Run coverage
         env:
           GRAMPS_TEST_URL: http://localhost:5055
-        run: cargo llvm-cov --lib --bins --tests --lcov --output-path lcov.info
+        run: |
+          show_env=$(cargo llvm-cov show-env)
+          while IFS= read -r line; do
+            key=${line%%=*}
+            value=${line#*=}
+            value=${value#\'}
+            value=${value%\'}
+            export "${key}=${value}"
+          done <<< "$show_env"
+
+          cargo test --lib --bins --tests
+          cargo llvm-cov report --lcov --output-path lcov.info
 
       # Runner is thrown away after the job either way, so there's no teardown step —
       # only logs, and only when something actually went wrong.
