@@ -406,6 +406,102 @@ async fn partial_update_replaces_list_when_included_in_data() {
 }
 
 #[tokio::test]
+async fn update_person_round_trips_a_strip_read_nested_object() {
+    let fixture = common::TestFixture::new().await;
+    let client = &fixture.client;
+
+    // primary_name has both filled subfields (first_name, surname_list, type) and
+    // explicitly empty ones (nick, call).
+    let handle = create::create_person(
+        client,
+        CreatePersonRequest {
+            primary_name: Some(PersonName {
+                first_name: Some("Original".to_string()),
+                surname_list: vec![Surname {
+                    surname: Some("Smith".to_string()),
+                    ..Default::default()
+                }],
+                name_type: Some("Birth Name".to_string()),
+                nick: Some(String::new()),
+                call: Some(String::new()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    // Read with the tools' default (strip=true): strip recurses into nested objects, so
+    // the empty primary_name.nick/call subfields are dropped here, not just empty
+    // top-level fields.
+    let stripped =
+        get::get_object_by_handle(client, "people", &handle, get::ReadOptions::default())
+            .await
+            .unwrap();
+    let mut primary_name = stripped["primary_name"].clone();
+    assert!(
+        primary_name.get("nick").is_none() && primary_name.get("call").is_none(),
+        "sanity check: strip should have dropped the empty nick/call subfields, got {primary_name}"
+    );
+    primary_name["first_name"] = serde_json::json!("Updated");
+
+    // Send the whole (stripped) primary_name back, as a caller would after fetching with
+    // the default strip, editing one field, and round-tripping the rest unchanged — this
+    // must not error just because nick/call are missing from the nested object.
+    update::update_person(
+        client,
+        &handle,
+        &serde_json::json!({"primary_name": primary_name}),
+    )
+    .await
+    .unwrap();
+
+    // Read back the full object (strip=false) to see exactly what landed.
+    let full = get::get_object_by_handle(
+        client,
+        "people",
+        &handle,
+        get::ReadOptions {
+            strip: Some(false),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let full_name = &full["primary_name"];
+    assert_eq!(
+        full_name["first_name"].as_str(),
+        Some("Updated"),
+        "got {full_name}"
+    );
+    assert_eq!(
+        full_name["surname_list"][0]["surname"].as_str(),
+        Some("Smith"),
+        "surname_list should survive the round trip, got {full_name}"
+    );
+    assert_eq!(
+        full_name["type"].as_str(),
+        Some("Birth Name"),
+        "got {full_name}"
+    );
+    assert_eq!(
+        full_name["nick"].as_str(),
+        Some(""),
+        "nick should still be present and empty, not dropped by the round trip, got {full_name}"
+    );
+    assert_eq!(
+        full_name["call"].as_str(),
+        Some(""),
+        "call should still be present and empty, not dropped by the round trip, got {full_name}"
+    );
+
+    delete::delete_object(client, "people", &handle)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
 async fn update_rejects_mismatched_handle_in_data_without_writing() {
     let fixture = common::TestFixture::new().await;
     let client = &fixture.client;
