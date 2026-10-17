@@ -105,11 +105,27 @@ pub async fn get_object(
 #[derive(Default, Clone, Copy)]
 pub struct ReadOptions<'a> {
     pub keys: Option<&'a [String]>,
+    /// `None` or `Some(true)` strips empty-valued fields (empty lists/strings, null dates)
+    /// — that's our tools' default, the opposite of Gramps Web's own (`strip=false` unless
+    /// asked). Pass `Some(false)` to get the complete object, empty fields included.
     pub strip: Option<bool>,
     pub profile: Option<&'a [String]>,
 }
 
 impl ReadOptions<'_> {
+    /// Read options for internal plumbing (media/merge helpers, anything doing its own
+    /// read-modify-write) that must always see the complete object: `strip`'s tools-level
+    /// default would otherwise drop empty fields before a merge, the same risk `keys` and
+    /// `profile` already have to be guarded against. Equivalent to `ReadOptions { strip:
+    /// Some(false), ..Default::default() }` — a named constructor so the intent reads at
+    /// the call site instead of as a bare `false`.
+    pub fn full_object() -> ReadOptions<'static> {
+        ReadOptions {
+            strip: Some(false),
+            ..ReadOptions::default()
+        }
+    }
+
     fn query_params(&self) -> Vec<String> {
         let mut params = Vec::new();
         if let Some(pp) = csv_param("profile", self.profile) {
@@ -118,7 +134,7 @@ impl ReadOptions<'_> {
         if let Some(kp) = csv_param("keys", self.effective_keys().as_deref()) {
             params.push(kp);
         }
-        if self.strip == Some(true) {
+        if self.strip != Some(false) {
             params.push("strip=true".to_string());
         }
         params
@@ -340,32 +356,42 @@ mod tests {
     }
 
     #[test]
-    fn read_options_default_has_no_params() {
-        assert_eq!(ReadOptions::default().query_params(), Vec::<String>::new());
+    fn read_options_default_strips_by_default() {
+        // No `strip` given at all (e.g. a caller who never heard of it) still gets the
+        // tools' default: strip empty fields.
+        assert_eq!(
+            ReadOptions::default().query_params(),
+            vec!["strip=true".to_string()],
+            "ReadOptions::default() must strip by default, matching get_object/list_objects's own default"
+        );
     }
 
     #[test]
-    fn read_options_strip_true_adds_strip_param() {
-        let opts = ReadOptions {
-            strip: Some(true),
-            ..Default::default()
-        };
-        assert_eq!(opts.query_params(), vec!["strip=true".to_string()]);
-    }
-
-    #[test]
-    fn read_options_strip_false_or_none_omits_strip_param() {
-        for strip in [Some(false), None] {
+    fn read_options_strip_none_or_true_adds_strip_param() {
+        for strip in [None, Some(true)] {
             let opts = ReadOptions {
                 strip,
                 ..Default::default()
             };
             assert_eq!(
                 opts.query_params(),
-                Vec::<String>::new(),
-                "strip={strip:?} should not add a query parameter"
+                vec!["strip=true".to_string()],
+                "strip={strip:?} should add strip=true"
             );
         }
+    }
+
+    #[test]
+    fn read_options_strip_false_omits_strip_param() {
+        let opts = ReadOptions {
+            strip: Some(false),
+            ..Default::default()
+        };
+        assert_eq!(
+            opts.query_params(),
+            Vec::<String>::new(),
+            "strip=false should opt back into the full object (Gramps Web's own default)"
+        );
     }
 
     #[test]
@@ -373,7 +399,6 @@ mod tests {
         let keys = vec!["gramps_id".to_string()];
         let opts = ReadOptions {
             keys: Some(&keys),
-            strip: Some(true),
             ..Default::default()
         };
         assert_eq!(
@@ -383,10 +408,21 @@ mod tests {
     }
 
     #[test]
+    fn full_object_disables_strip_and_adds_no_other_params() {
+        assert_eq!(
+            ReadOptions::full_object().query_params(),
+            Vec::<String>::new(),
+            "internal read-modify-write plumbing must fetch the complete, unfiltered \
+             object — same contract as update's own fetch_path"
+        );
+    }
+
+    #[test]
     fn read_options_profile_adds_profile_param() {
         let profile = vec!["self".to_string()];
         let opts = ReadOptions {
             profile: Some(&profile),
+            strip: Some(false),
             ..Default::default()
         };
         assert_eq!(opts.query_params(), vec!["profile=self".to_string()]);
@@ -412,7 +448,7 @@ mod tests {
         let opts = ReadOptions {
             keys: Some(&keys),
             profile: Some(&profile),
-            ..Default::default()
+            strip: Some(false),
         };
         assert_eq!(
             opts.query_params(),
@@ -432,7 +468,7 @@ mod tests {
         let opts = ReadOptions {
             keys: Some(&keys),
             profile: Some(&profile),
-            ..Default::default()
+            strip: Some(false),
         };
         assert_eq!(
             opts.query_params(),

@@ -430,7 +430,11 @@ async fn list_objects_with_empty_keys_returns_full_objects() {
     let handle = create::create_person(client, CreatePersonRequest::default())
         .await
         .unwrap();
-    let full = get::get_object_by_handle(client, "people", &handle, get::ReadOptions::default())
+    let full_opts = get::ReadOptions {
+        strip: Some(false),
+        ..Default::default()
+    };
+    let full = get::get_object_by_handle(client, "people", &handle, full_opts)
         .await
         .unwrap();
     let gramps_id = full["gramps_id"].as_str().expect("gramps_id missing");
@@ -445,6 +449,7 @@ async fn list_objects_with_empty_keys_returns_full_objects() {
         None,
         get::ReadOptions {
             keys: Some(&empty_keys),
+            strip: Some(false),
             ..Default::default()
         },
     )
@@ -465,16 +470,34 @@ async fn list_objects_with_empty_keys_returns_full_objects() {
 }
 
 #[tokio::test]
-async fn get_object_by_handle_with_strip_omits_empty_fields() {
+async fn get_object_by_handle_strips_empty_fields_by_default() {
     let fixture = common::TestFixture::new().await;
     let client = &fixture.client;
 
-    // Default person: note_list is an empty list — exactly what `strip=true` should drop.
-    let handle = create::create_person(client, CreatePersonRequest::default())
-        .await
-        .unwrap();
+    // note_list is an empty list — exactly what stripping should drop. gender/private are
+    // explicit falsy-but-not-empty values (Gramps Web defaults an unset gender to 2, not 0).
+    let handle = create::create_person(
+        client,
+        CreatePersonRequest {
+            gender: Some(0),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
 
-    let stripped = get::get_object_by_handle(
+    // No `strip` at all — ReadOptions::default() — must still strip; that's the tools'
+    // own default, independent of Gramps Web's own default (strip=false).
+    let default_opts =
+        get::get_object_by_handle(client, "people", &handle, get::ReadOptions::default())
+            .await
+            .unwrap();
+    assert!(
+        default_opts.get("note_list").is_none(),
+        "empty fields should be omitted by default (no `strip` argument at all), got {default_opts}"
+    );
+
+    let explicit_true = get::get_object_by_handle(
         client,
         "people",
         &handle,
@@ -486,18 +509,47 @@ async fn get_object_by_handle_with_strip_omits_empty_fields() {
     .await
     .unwrap();
     assert!(
-        stripped.get("note_list").is_none(),
-        "strip=true should omit the empty note_list field, got {stripped}"
+        explicit_true.get("note_list").is_none(),
+        "strip=true should omit the empty note_list field, got {explicit_true}"
     );
 
-    let unstripped =
-        get::get_object_by_handle(client, "people", &handle, get::ReadOptions::default())
-            .await
-            .unwrap();
+    let strip_false = get::get_object_by_handle(
+        client,
+        "people",
+        &handle,
+        get::ReadOptions {
+            strip: Some(false),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
     assert_eq!(
-        unstripped.get("note_list"),
+        strip_false.get("note_list"),
         Some(&serde_json::json!([])),
-        "sanity check: without strip, the empty note_list field is present as []"
+        "strip=false should opt back into the full object, including empty note_list"
+    );
+    assert_eq!(
+        strip_false.get("gender"),
+        Some(&serde_json::json!(0)),
+        "gender=0 (unknown) is falsy but not empty — must never be stripped, got {strip_false}"
+    );
+    assert_eq!(
+        strip_false.get("private"),
+        Some(&serde_json::json!(false)),
+        "private=false is falsy but not empty — must never be stripped, got {strip_false}"
+    );
+
+    // And the same falsy-but-not-empty fields must survive the default (stripped) path too.
+    assert_eq!(
+        default_opts.get("gender"),
+        Some(&serde_json::json!(0)),
+        "gender=0 must not be stripped even when strip is on by default, got {default_opts}"
+    );
+    assert_eq!(
+        default_opts.get("private"),
+        Some(&serde_json::json!(false)),
+        "private=false must not be stripped even when strip is on by default, got {default_opts}"
     );
 
     delete::delete_object(client, "people", &handle)
@@ -594,6 +646,9 @@ async fn get_object_by_handle_with_profile_self_includes_name_birth_death() {
     .await
     .unwrap();
 
+    // strip=false: strip (on by default) would otherwise recurse into `profile` itself and
+    // drop its empty `birth`/`death` summaries (this person has no birth/death event), which
+    // is exactly what this test wants to see.
     let profile_sections = vec!["self".to_string()];
     let obj = get::get_object_by_handle(
         client,
@@ -601,6 +656,7 @@ async fn get_object_by_handle_with_profile_self_includes_name_birth_death() {
         &handle,
         get::ReadOptions {
             profile: Some(&profile_sections),
+            strip: Some(false),
             ..Default::default()
         },
     )

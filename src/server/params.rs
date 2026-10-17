@@ -144,7 +144,7 @@ pub struct GetObjectInput {
     pub gramps_id: Option<String>,
     /// Top-level field names only, no paths, e.g. ["gramps_id", "primary_name", "parent_family_list"] — a requested nested field is returned whole. All other top-level fields are omitted; omit `keys` entirely to return the full object.
     pub keys: Option<Vec<String>>,
-    /// If true, drop empty-valued fields (empty lists/strings, null dates) from the response.
+    /// Empty fields are omitted by default; pass false to include them.
     pub strip: Option<bool>,
     /// Adds a pre-formatted `profile` summary; "self" is usually enough for lists.
     pub profile: Option<Vec<ProfileSection>>,
@@ -170,7 +170,7 @@ pub struct ListObjectsInput {
     pub pagesize: Option<u32>,
     /// Top-level field names only, no paths, e.g. ["gramps_id", "primary_name", "parent_family_list"] — a requested nested field is returned whole. All other top-level fields are omitted; omit `keys` entirely to return full objects.
     pub keys: Option<Vec<String>>,
-    /// If true, drop empty-valued fields (empty lists/strings, null dates) from each object.
+    /// Empty fields are omitted by default; pass false to include them.
     pub strip: Option<bool>,
     /// Adds a pre-formatted `profile` summary to each object; "self" is usually enough for lists.
     pub profile: Option<Vec<ProfileSection>>,

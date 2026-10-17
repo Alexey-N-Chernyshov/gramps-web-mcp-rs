@@ -17,9 +17,8 @@ after a failed one. Use `query_object`'s `select` and `limit` to avoid
 pulling full objects you don't need. `get_object` and `list_objects` take
 `keys` for the same purpose, but only top-level field names (e.g.
 `"primary_name"`, not `"primary_name.first_name"`) — a requested nested
-field still comes back whole. Both also take `strip: true` to drop
-empty-valued fields (empty lists/strings, null dates) from the response,
-which combines with `keys`. For overview listings of people, prefer
+field still comes back whole. Empty fields are omitted by default — a
+missing field means empty. For overview listings of people, prefer
 `profile: ["self"]` together with `keys: ["gramps_id", "parent_family_list"]`
 over full objects. Once you have a `handle` or `gramps_id`, read the full
 record with `get_object`.
