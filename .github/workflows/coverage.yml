@@ -73,13 +73,12 @@ jobs:
       - name: Run coverage (${{ matrix.name }})
         run: cargo llvm-cov ${{ matrix.args }} --lcov --output-path lcov.info
 
-      - name: Upload to Codecov
-        uses: codecov/codecov-action@v7
+      - name: Upload lcov artifact
+        uses: actions/upload-artifact@v7
         with:
-          files: lcov.info
-          flags: ${{ matrix.name }}
-          token: ${{ secrets.CODECOV_TOKEN }}
-          fail_ci_if_error: ${{ github.event.pull_request.head.repo.fork != true }}
+          name: lcov-${{ matrix.name }}
+          path: lcov.info
+          retention-days: 1
 
   # Required-status-check aggregator: branch protection targets this stable
   # job name instead of the per-matrix-leg names above, which change
@@ -96,3 +95,19 @@ jobs:
             echo "One or more coverage matrix legs failed"
             exit 1
           fi
+
+      - uses: actions/checkout@v7
+
+      - name: Download lcov artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: lcov-*
+          path: coverage-reports
+          merge-multiple: false
+
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          directory: coverage-reports
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: ${{ github.event.pull_request.head.repo.fork != true }}
