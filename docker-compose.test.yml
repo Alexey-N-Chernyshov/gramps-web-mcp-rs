@@ -24,3 +24,11 @@ services:
       # Without this, media storage is a single shared directory across all trees (Gramps
       # Web itself warns this "exposes media files to users belonging to different trees").
       GRAMPSWEB_MEDIA_PREFIX_TREE: "true"
+    # Readiness = gunicorn accepting TCP connections, not a 200 — every real endpoint
+    # requires auth and 401s until a user exists, which curl/wget would treat as failure.
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import socket; socket.create_connection(('localhost', 5000), timeout=2).close()"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 5s

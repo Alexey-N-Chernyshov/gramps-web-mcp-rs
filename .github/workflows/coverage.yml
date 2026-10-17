@@ -26,20 +26,28 @@ jobs:
           persist-credentials: false
 
       # Backgrounded (not awaited here) so the image pull + container creation overlaps with
-      # the toolchain/cache/build steps below instead of blocking in front of them. `nohup`
-      # keeps it alive past this step's own shell exiting; the PID file lets a later step
-      # (which runs in a fresh shell — bash's own `wait` can't reach across that) poll for it
-      # to finish instead.
+      # the toolchain/cache/build steps below instead of blocking in front of them. `--wait`
+      # makes this `up -d` itself block on the compose file's healthcheck, so no manual
+      # readiness polling is needed later — just waiting for this backgrounded command to
+      # finish. `nohup` keeps it alive past this step's own shell exiting; the PID file lets
+      # a later step (a fresh shell — bash's own `wait` can't reach across that) poll for it.
       - name: Start Gramps Web test stack (background)
         run: |
-          nohup docker compose -f docker-compose.test.yml up -d > compose.log 2>&1 &
+          nohup sh -c '
+            docker compose -f docker-compose.test.yml up -d --wait --wait-timeout 60
+            echo $? > compose-up.exit
+          ' > compose.log 2>&1 &
           echo $! > compose-up.pid
 
       - name: Install Rust toolchain
         run: rustup toolchain install stable --profile minimal --component llvm-tools-preview
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          shared-key: coverage
+          # Bumped from `coverage`: that key's existing cache was built under the old
+          # (pre-show-env-persist) flags, so every run restored a mismatched cache,
+          # recompiled everything anyway, and never saved a cache that actually matched —
+          # a new key starts a cache line that matches how this job builds now.
+          shared-key: coverage-v2
       - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
           tool: cargo-llvm-cov
@@ -70,18 +78,14 @@ jobs:
           pid=$(cat compose-up.pid)
           while kill -0 "$pid" 2>/dev/null; do sleep 1; done
 
-          port=$(docker compose -f docker-compose.test.yml port grampsweb-test 5000 | cut -d: -f2)
-          for _ in $(seq 1 60); do
-            code=$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:$port/api/metadata/") || true
-            [ "$code" != "000" ] && break
-            sleep 1
-          done
-          if [ "$code" = "000" ]; then
-            echo "::error::Gramps Web test stack did not respond within 60 seconds"
+          if [ "$(cat compose-up.exit)" != "0" ]; then
+            echo "::error::Gramps Web test stack did not become healthy within 60 seconds"
             cat compose.log
             docker compose -f docker-compose.test.yml logs
             exit 1
           fi
+
+          port=$(docker compose -f docker-compose.test.yml port grampsweb-test 5000 | cut -d: -f2)
           echo "GRAMPS_TEST_URL=http://localhost:$port" >> "$GITHUB_ENV"
 
       - name: Run coverage
