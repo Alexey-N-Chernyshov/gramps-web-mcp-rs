@@ -13,33 +13,12 @@ env:
   RUSTFLAGS: -D warnings
 
 jobs:
-  # Builds the coverage-matrix leg list from whatever's actually in
-  # `tests/*.rs` right now, plus the fixed `unit` leg (`--lib --bins`), so
-  # a new integration test file is picked up automatically instead of
-  # needing a matching matrix entry added by hand.
-  discover-tests:
-    name: Discover integration test files
-    runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.list.outputs.matrix }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - id: list
-        run: |
-          matrix=$(
-            for f in tests/*.rs; do basename "$f" .rs; done \
-              | jq -R -s -c '
-                  split("\n") | map(select(length > 0)) |
-                  map({name: ., args: ("--test " + .)})
-                ' \
-              | jq -c '[{name: "unit", args: "--lib --bins"}] + .'
-          )
-          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
-
-  coverage-warmup:
-    name: Warm coverage build cache
+  # Single job: the whole test suite shares one Gramps Web instance via `GRAMPS_TEST_URL`
+  # instead of each integration test file spinning up its own docker-compose stack through
+  # testcontainers (see tests/support/helpers.rs). Nothing here names individual test files —
+  # `--tests` picks up whatever's in `tests/*.rs` automatically.
+  coverage:
+    name: Coverage
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -54,40 +33,7 @@ jobs:
         with:
           tool: cargo-llvm-cov
 
-      - name: Pre-build lib + all test binaries under coverage instrumentation
-        run: |
-          eval "$(cargo llvm-cov show-env --export-prefix)"
-          export CARGO_TARGET_DIR="$CARGO_LLVM_COV_TARGET_DIR/llvm-cov-target"
-          cargo build --tests
-
-  coverage-matrix:
-    name: Coverage (${{ matrix.name }})
-    needs: [coverage-warmup, discover-tests]
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include: ${{ fromJson(needs.discover-tests.outputs.matrix) }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - name: Install Rust toolchain
-        run: rustup toolchain install stable --profile minimal --component llvm-tools-preview
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          shared-key: coverage
-      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
-        with:
-          tool: cargo-llvm-cov
-
-      # `unit` (--lib --bins) never touches Gramps Web. Every other leg's tests share one
-      # Gramps Web instance via `GRAMPS_TEST_URL` instead of each spinning up its own
-      # docker-compose stack through testcontainers (see tests/support/helpers.rs) — a
-      # CI runner only ever runs one matrix leg, so "one stack per workflow step" here is
-      # the same "one stack per test run" the test code itself does locally.
       - name: Start Gramps Web test stack
-        if: matrix.name != 'unit'
         run: |
           docker compose -f docker-compose.test.yml up -d
           port=$(docker compose -f docker-compose.test.yml port grampsweb-test 5000 | cut -d: -f2)
@@ -96,52 +42,23 @@ jobs:
             [ "$code" != "000" ] && break
             sleep 1
           done
-          echo "GRAMPS_TEST_URL=http://localhost:$port" >> "$GITHUB_ENV"
-
-      - name: Run coverage (${{ matrix.name }})
-        run: cargo llvm-cov ${{ matrix.args }} --lcov --output-path lcov.info
-
-      - name: Stop Gramps Web test stack
-        if: always() && matrix.name != 'unit'
-        run: docker compose -f docker-compose.test.yml down -v
-
-      - name: Upload lcov artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: lcov-${{ matrix.name }}
-          path: lcov.info
-          retention-days: 1
-
-  # Required-status-check aggregator: branch protection targets this stable
-  # job name instead of the per-matrix-leg names above, which change
-  # whenever a test file is added/removed/renamed.
-  coverage:
-    name: Coverage
-    needs: coverage-matrix
-    if: always()
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check matrix result
-        run: |
-          if [ "${{ needs.coverage-matrix.result }}" != "success" ]; then
-            echo "One or more coverage matrix legs failed"
+          if [ "$code" = "000" ]; then
+            echo "::error::Gramps Web test stack did not respond within 60 seconds"
+            docker compose -f docker-compose.test.yml logs
             exit 1
           fi
+          echo "GRAMPS_TEST_URL=http://localhost:$port" >> "$GITHUB_ENV"
 
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
+      - name: Run coverage
+        run: cargo llvm-cov --lib --bins --tests --lcov --output-path lcov.info
 
-      - name: Download lcov artifacts
-        uses: actions/download-artifact@v8
-        with:
-          pattern: lcov-*
-          path: coverage-reports
-          merge-multiple: false
+      - name: Stop Gramps Web test stack
+        if: always()
+        run: docker compose -f docker-compose.test.yml down -v
 
       - name: Upload to Codecov
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
-          directory: coverage-reports
+          files: lcov.info
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: ${{ github.event.pull_request.head.repo.fork != true }}
