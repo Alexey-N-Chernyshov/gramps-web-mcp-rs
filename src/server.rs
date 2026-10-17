@@ -232,8 +232,9 @@ or \"repository\" (not \"tag\" — it has no rule catalog upstream).")]
 
     #[tool(description = "\
 Get one already-identified genealogy object, by `handle` or `gramps_id` (exactly one \
-required). `object_type` is always required, as a quoted string: \"person\", \"family\", \
-\"event\", \"place\", \"note\", \"citation\", \"source\", \"media\", \"repository\", or \"tag\". \
+required; `gramps_id` isn't supported for \"tag\" — tags have no Gramps ID, use `handle`). \
+`object_type` is always required, as a quoted string: \"person\", \"family\", \"event\", \
+\"place\", \"note\", \"citation\", \"source\", \"media\", \"repository\", or \"tag\". \
 To find objects you don't already have a handle/gramps_id for, use `search`, `list_objects`, \
 or `query_object` instead.")]
     async fn get_object(
@@ -252,11 +253,12 @@ or `query_object` instead.")]
                  \"person\", \"family\", \"event\", \"place\", \"note\", \"citation\", \"source\", \"media\", \"repository\", \"tag\"",
             )]));
         };
-        let lookup = match get::resolve_object_lookup(handle, gramps_id) {
+        let endpoint = object_type.as_endpoint();
+        let lookup = match get::resolve_object_lookup(endpoint, handle, gramps_id) {
             Ok(lookup) => lookup,
             Err(msg) => return Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
         };
-        get::get_object(&client, object_type.as_endpoint(), lookup)
+        get::get_object(&client, endpoint, lookup)
             .await
             .map_or_else(api_err, ok_json)
     }

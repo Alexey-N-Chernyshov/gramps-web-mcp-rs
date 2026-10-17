@@ -65,14 +65,17 @@ pub enum ObjectLookup {
     GrampsId(String),
 }
 
-/// Validates `get_object`'s `handle`/`gramps_id` arguments: exactly one must be given. The
-/// `Err` string is the user-facing tool error message.
+/// Validates `get_object`'s `handle`/`gramps_id` arguments: exactly one must be given, and
+/// `gramps_id` is rejected outright for `endpoint == "tags"` (tags have no Gramps ID) without
+/// making an API call. The `Err` string is the user-facing tool error message.
 pub fn resolve_object_lookup(
+    endpoint: &str,
     handle: Option<String>,
     gramps_id: Option<String>,
 ) -> std::result::Result<ObjectLookup, &'static str> {
     match (handle, gramps_id) {
         (Some(h), None) => Ok(ObjectLookup::Handle(h)),
+        (None, Some(_)) if endpoint == "tags" => Err("tags have no gramps_id — use handle"),
         (None, Some(id)) => Ok(ObjectLookup::GrampsId(id)),
         (Some(_), Some(_)) => Err("Provide only one of `handle` or `gramps_id`, not both."),
         (None, None) => Err(
@@ -101,9 +104,9 @@ pub async fn get_object_by_handle(
     client.get(&format!("/api/{endpoint}/{handle}")).await
 }
 
-/// Resolves a Gramps ID to a single object by filtering the collection endpoint. Gramps IDs
-/// are not guaranteed unique, so this errors on anything but exactly one match rather than
-/// silently returning one of several candidates.
+/// Resolves a Gramps ID to a single object by filtering the collection endpoint. Gramps Web
+/// itself only ever returns zero or one match for `?gramps_id=...` (404, or a one-element
+/// array) — it never returns several, even if duplicate Gramps IDs exist in the tree.
 pub async fn get_object_by_gramps_id(
     client: &GrampsClient,
     endpoint: &str,
@@ -111,13 +114,25 @@ pub async fn get_object_by_gramps_id(
 ) -> Result<serde_json::Value> {
     let collection =
         get_object_collection(client, endpoint, Some(gramps_id), None, None, None).await?;
-    let items = collection.as_array().cloned().unwrap_or_default();
+    let items = expect_array(endpoint, collection)?;
     resolve_gramps_id_match(endpoint, gramps_id, items)
 }
 
+/// Takes a `?gramps_id=...` collection response apart by value, failing with a clear
+/// `Error::Parse` (rather than `Error::NotFound`) if the backend didn't return a JSON array.
+fn expect_array(endpoint: &str, collection: serde_json::Value) -> Result<Vec<serde_json::Value>> {
+    match collection {
+        serde_json::Value::Array(items) => Ok(items),
+        other => Err(Error::Parse(format!(
+            "expected GET /api/{endpoint}/?gramps_id=... to return a JSON array, got: {other}"
+        ))),
+    }
+}
+
 /// Picks the single match for a gramps_id out of the collection results, or produces a
-/// descriptive error for zero or multiple matches. Split out from `get_object_by_gramps_id`
-/// so the 0/1/many branching is unit-testable without a live backend.
+/// descriptive error for zero matches. The multiple-matches branch is a defensive fallback,
+/// not documented upstream behavior — Gramps Web's own `?gramps_id=...` filtering never
+/// returns more than one match — kept in case that ever changes.
 fn resolve_gramps_id_match(
     endpoint: &str,
     gramps_id: &str,
@@ -179,27 +194,53 @@ mod tests {
 
     #[test]
     fn resolve_object_lookup_accepts_handle_only() {
-        let lookup = resolve_object_lookup(Some("H1".to_string()), None).unwrap();
+        let lookup = resolve_object_lookup("people", Some("H1".to_string()), None).unwrap();
         assert!(matches!(lookup, ObjectLookup::Handle(h) if h == "H1"));
     }
 
     #[test]
     fn resolve_object_lookup_accepts_gramps_id_only() {
-        let lookup = resolve_object_lookup(None, Some("I0001".to_string())).unwrap();
+        let lookup = resolve_object_lookup("people", None, Some("I0001".to_string())).unwrap();
         assert!(matches!(lookup, ObjectLookup::GrampsId(id) if id == "I0001"));
     }
 
     #[test]
     fn resolve_object_lookup_rejects_both() {
         let err =
-            resolve_object_lookup(Some("H1".to_string()), Some("I0001".to_string())).unwrap_err();
+            resolve_object_lookup("people", Some("H1".to_string()), Some("I0001".to_string()))
+                .unwrap_err();
         assert!(err.contains("not both"), "got: {err}");
     }
 
     #[test]
     fn resolve_object_lookup_rejects_neither() {
-        let err = resolve_object_lookup(None, None).unwrap_err();
+        let err = resolve_object_lookup("people", None, None).unwrap_err();
         assert!(err.contains("exactly one"), "got: {err}");
+    }
+
+    #[test]
+    fn resolve_object_lookup_rejects_gramps_id_for_tags() {
+        let err = resolve_object_lookup("tags", None, Some("I0001".to_string())).unwrap_err();
+        assert!(err.contains("gramps_id"), "got: {err}");
+        assert!(err.contains("handle"), "got: {err}");
+    }
+
+    #[test]
+    fn resolve_object_lookup_allows_handle_for_tags() {
+        let lookup = resolve_object_lookup("tags", Some("T1".to_string()), None).unwrap();
+        assert!(matches!(lookup, ObjectLookup::Handle(h) if h == "T1"));
+    }
+
+    #[test]
+    fn expect_array_passes_through_an_array() {
+        let items = expect_array("people", serde_json::json!([{"handle": "H1"}])).unwrap();
+        assert_eq!(items.len(), 1);
+    }
+
+    #[test]
+    fn expect_array_rejects_non_array_with_parse_error() {
+        let err = expect_array("people", serde_json::json!({"handle": "H1"})).unwrap_err();
+        assert!(matches!(err, Error::Parse(_)), "got: {err:?}");
     }
 
     #[test]

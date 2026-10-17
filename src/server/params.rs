@@ -109,9 +109,7 @@ pub struct GetObjectInput {
     /// Handle of a specific, already-known object. Exactly one of `handle`/`gramps_id` is required.
     pub handle: Option<String>,
     /// Gramps ID of a specific, already-known object (e.g. "I0001"). Exactly one of
-    /// `handle`/`gramps_id` is required. Gramps IDs are not guaranteed unique, so if more
-    /// than one object matches, this returns an error listing their handles instead of a
-    /// single object.
+    /// `handle`/`gramps_id` is required. Not supported for "tag" — tags have no Gramps ID.
     pub gramps_id: Option<String>,
 }
 
