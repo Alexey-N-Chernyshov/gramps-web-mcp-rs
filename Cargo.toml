@@ -60,6 +60,9 @@ strum = { version = "0.28", features = ["derive"] }
 url = { version = "2", features = ["serde"] }
 urlencoding = "2"
 
+[lints.clippy]
+unwrap_used = "warn"
+
 [package.metadata.cargo-machete]
 # md-5 declares `[lib] name = "md5"`, so the crate is used as `md5::...` in source.
 # cargo-machete matches dependencies by package name (md-5 -> md_5) and doesn't see

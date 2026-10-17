@@ -971,7 +971,7 @@ async fn create_person_born_in(client: &GrampsClient, year: i32) -> (Handle, Han
         },
     )
     .await
-    .unwrap();
+    .expect("creating the birth event fixture should succeed");
 
     let person_handle = create::create_person(
         client,
@@ -983,7 +983,7 @@ async fn create_person_born_in(client: &GrampsClient, year: i32) -> (Handle, Han
         },
     )
     .await
-    .unwrap();
+    .expect("creating the person fixture should succeed");
 
     // Adding to event_ref_list alone doesn't register it as *the* birth event — Gramps
     // Web's `sort=birth` reads `birth_ref_index` (an index into event_ref_list), which
@@ -994,7 +994,7 @@ async fn create_person_born_in(client: &GrampsClient, year: i32) -> (Handle, Han
         &serde_json::json!({"birth_ref_index": 0}),
     )
     .await
-    .unwrap();
+    .expect("setting birth_ref_index on the person fixture should succeed");
 
     (person_handle, event_handle)
 }

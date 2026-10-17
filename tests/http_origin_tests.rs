@@ -36,7 +36,9 @@ use rmcp::transport::streamable_http_server::{
 
 fn test_config() -> Config {
     Config {
-        gramps_api_url: "http://gramps.invalid".parse().unwrap(),
+        gramps_api_url: "http://gramps.invalid"
+            .parse()
+            .expect("test api url should be a valid URL"),
         gramps_username: Some("svc".to_string()),
         gramps_password: Some("pw".to_string().into()),
         gramps_readonly: false,
@@ -56,7 +58,8 @@ fn test_config() -> Config {
 }
 
 fn mcp_app(http_config: StreamableHttpServerConfig) -> Router {
-    let mcp_server = GrampsMcpServer::new(test_config()).unwrap();
+    let mcp_server =
+        GrampsMcpServer::new(test_config()).expect("test config should build a valid server");
     let session_manager = Arc::new(LocalSessionManager::default());
     let service =
         StreamableHttpService::new(move || Ok(mcp_server.clone()), session_manager, http_config);
@@ -64,10 +67,16 @@ fn mcp_app(http_config: StreamableHttpServerConfig) -> Router {
 }
 
 async fn spawn(app: Router) -> String {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("binding to an ephemeral local port should succeed");
+    let addr = listener
+        .local_addr()
+        .expect("bound listener should have a local address");
     tokio::spawn(async move {
-        axum::serve(listener, app).await.unwrap();
+        axum::serve(listener, app)
+            .await
+            .expect("test server should serve without error");
     });
     format!("http://{addr}")
 }
