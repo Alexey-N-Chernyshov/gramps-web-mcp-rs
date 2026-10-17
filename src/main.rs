@@ -12,22 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod app_error;
-mod auth;
-mod client;
-mod config;
-mod http_auth;
-mod models;
-mod oauth;
-mod server;
-mod tools;
-
-use std::sync::Arc;
-
-use app_error::AppError;
-use config::TransportMode;
+use gramps_web_mcp_rs::{app::build_app, app_error::AppError, config, server};
 use rmcp::{transport::io::stdio, ServiceExt};
-use secrecy::ExposeSecret;
 
 #[tokio::main]
 async fn main() -> Result<(), AppError> {
@@ -41,8 +27,8 @@ async fn main() -> Result<(), AppError> {
     );
 
     match config.mcp_transport.clone() {
-        TransportMode::Stdio => run_stdio(config).await,
-        TransportMode::Http => run_http(config).await,
+        config::TransportMode::Stdio => run_stdio(config).await,
+        config::TransportMode::Http => run_http(config).await,
     }
 }
 
@@ -71,140 +57,9 @@ async fn run_stdio(config: config::Config) -> Result<(), AppError> {
 }
 
 async fn run_http(config: config::Config) -> Result<(), AppError> {
-    use axum::http::Method;
-    use rmcp::transport::streamable_http_server::{
-        session::local::LocalSessionManager, StreamableHttpServerConfig, StreamableHttpService,
-    };
-    use tower_http::cors::{AllowOrigin, CorsLayer};
+    let bind_addr = format!("{}:{}", config.mcp_http_host, config.mcp_http_port);
 
-    let host = config.mcp_http_host.clone();
-    let port = config.mcp_http_port;
-    let bind_addr = format!("{host}:{port}");
-    let auth_token = config.mcp_auth_token.clone();
-    let allowed_hosts_raw = config.mcp_allowed_hosts.clone();
-    let allowed_origins = match config.mcp_allowed_origins.as_deref() {
-        Some(raw) => crate::config::parse_allowed_origins(raw)?,
-        None => Vec::new(),
-    };
-    let oauth_enabled = config.mcp_oauth_enabled;
-    let oauth_storage_path = config.mcp_oauth_storage_path.clone();
-    let oauth_storage_key = config.mcp_oauth_storage_key.clone();
-    let oauth_public_url = config.mcp_oauth_public_url.clone();
-    let gramps_api_url = config.gramps_api_url.clone();
-    let max_media_bytes = config.mcp_max_media_bytes;
-    let keep_alive = match config.mcp_keep_alive {
-        0 => {
-            tracing::info!("HTTP session keep-alive disabled");
-            None
-        }
-        secs => {
-            tracing::info!("HTTP session keep-alive: {} seconds", secs);
-            Some(std::time::Duration::from_secs(secs))
-        }
-    };
-
-    let mcp_server = server::GrampsMcpServer::new(config)?;
-
-    let http_config = match allowed_hosts_raw.as_deref() {
-        Some(raw) => {
-            let hosts = crate::config::parse_allowed_hosts(raw);
-            if hosts.is_empty() {
-                StreamableHttpServerConfig::default()
-            } else {
-                tracing::info!("HTTP allowed hosts: {:?}", hosts);
-                StreamableHttpServerConfig::default().with_allowed_hosts(hosts)
-            }
-        }
-        None => StreamableHttpServerConfig::default(),
-    };
-    let http_config = if allowed_origins.is_empty() {
-        tracing::info!(
-            "HTTP Origin validation enforced: requests carrying an Origin header are rejected \
-             (403) unless MCP_ALLOWED_ORIGINS lists it; requests with no Origin header still \
-             pass through"
-        );
-        http_config.enforce_origin_validation()
-    } else {
-        tracing::info!("HTTP allowed origins: {:?}", allowed_origins);
-        http_config.with_allowed_origins(allowed_origins.clone())
-    }
-    // Plain JSON responses instead of chunked SSE for simple request/response
-    // calls — some reverse proxies (and flaky tunnels) mishandle chunked
-    // text/event-stream bodies.
-    .with_json_response(true);
-
-    let mut session_manager = LocalSessionManager::default();
-    session_manager.session_config.keep_alive = keep_alive;
-    let session_manager = Arc::new(session_manager);
-
-    let service =
-        StreamableHttpService::new(move || Ok(mcp_server.clone()), session_manager, http_config);
-
-    let mcp_router = if oauth_enabled {
-        tracing::info!("OAuth mode enabled — per-user Gramps identity on every request");
-        let store = oauth::Store::open(
-            oauth_storage_path,
-            oauth_storage_key
-                .as_ref()
-                .expect("validated non-empty by Config::from_env when OAuth is enabled")
-                .expose_secret(),
-        )
-        .await?;
-        let oauth_state = Arc::new(oauth::OAuthState {
-            store,
-            api_url: gramps_api_url,
-            http: reqwest::Client::new(),
-            issuer: oauth_public_url
-                .expect("validated non-empty by Config::from_env when OAuth is enabled"),
-            max_media_bytes,
-        });
-        axum::Router::new()
-            .nest_service("/mcp", service)
-            .route_layer(axum::middleware::from_fn_with_state(
-                oauth_state.clone(),
-                oauth::identity_middleware,
-            ))
-            .merge(oauth::router(oauth_state))
-    } else {
-        match auth_token {
-            Some(token) => {
-                tracing::info!("HTTP auth enabled");
-                axum::Router::new()
-                    .nest_service("/mcp", service)
-                    .route_layer(axum::middleware::from_fn_with_state(
-                        token,
-                        http_auth::bearer_auth_middleware,
-                    ))
-            }
-            None => {
-                tracing::warn!("HTTP auth disabled — set MCP_AUTH_TOKEN for public deployments");
-                axum::Router::new().nest_service("/mcp", service)
-            }
-        }
-    };
-
-    let cors = if allowed_origins.is_empty() {
-        None
-    } else {
-        let origins = allowed_origins.clone();
-        Some(
-            CorsLayer::new()
-                .allow_methods([Method::GET, Method::POST, Method::DELETE])
-                .allow_headers(tower_http::cors::Any)
-                .allow_origin(AllowOrigin::predicate(move |origin, _parts| {
-                    origin
-                        .to_str()
-                        .is_ok_and(|o| crate::config::origin_matches(o, &origins))
-                })),
-        )
-    };
-
-    let app = mcp_router.route("/health", axum::routing::get(|| async { "ok" }));
-    let app = match cors {
-        Some(cors) => app.layer(cors),
-        None => app,
-    };
-    let app = app.layer(tower_http::trace::TraceLayer::new_for_http());
+    let app = build_app(config).await?;
 
     let listener = tokio::net::TcpListener::bind(&bind_addr).await?;
 
