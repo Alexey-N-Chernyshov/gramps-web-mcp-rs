@@ -12,35 +12,65 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `src/main.rs` only mounts a `CorsLayer` when `MCP_ALLOWED_ORIGINS` is
-//! set, and then only reflects origins from that list. With it unset (the
-//! default), no CORS headers are emitted at all. These tests build the
-//! same middleware chains `src/main.rs` wires up around `/mcp`
-//! (`http_auth::bearer_auth_middleware` for the static-token mode,
-//! `oauth::identity_middleware` for OAuth mode) with a stand-in `/mcp`
-//! handler, since the real rmcp service isn't needed to exercise our own
-//! CORS wiring. The companion rmcp-level Origin check
-//! (`StreamableHttpServerConfig::enforce_origin_validation`/
+//! `build_app` only mounts a `CorsLayer` when `MCP_ALLOWED_ORIGINS` is set,
+//! and then only reflects origins from that list. With it unset (the
+//! default), no CORS headers are emitted at all. These tests exercise the
+//! real router `build_app` produces, with a `gramps.invalid` API URL so
+//! nothing actually reaches a Gramps Web backend — only requests that pass
+//! auth/CORS would ever try, and none of these do. The companion rmcp-level
+//! Origin check (`StreamableHttpServerConfig::enforce_origin_validation`/
 //! `with_allowed_origins`) is covered separately in
-//! `tests/http_origin_tests.rs`, against the real `/mcp` service.
+//! `tests/http_origin_tests.rs`.
 
-use std::sync::Arc;
+use gramps_web_mcp_rs::{
+    app::build_app,
+    config::{Config, TransportMode},
+};
 
-use axum::{http::Method, routing::any, Router};
-use gramps_web_mcp_rs::{config::origin_matches, http_auth::bearer_auth_middleware, oauth};
-use secrecy::SecretString;
-use tower_http::cors::{AllowOrigin, CorsLayer};
-
-fn cors_layer(allowed: Vec<String>) -> CorsLayer {
-    CorsLayer::new()
-        .allow_methods([Method::GET, Method::POST, Method::DELETE])
-        .allow_headers(tower_http::cors::Any)
-        .allow_origin(AllowOrigin::predicate(move |origin, _parts| {
-            origin.to_str().is_ok_and(|o| origin_matches(o, &allowed))
-        }))
+fn test_config() -> Config {
+    Config {
+        gramps_api_url: "http://gramps.invalid"
+            .parse()
+            .expect("test api url should be a valid URL"),
+        gramps_username: Some("svc".to_string()),
+        gramps_password: Some("pw".to_string().into()),
+        gramps_readonly: false,
+        mcp_transport: TransportMode::Http,
+        mcp_http_host: "127.0.0.1".to_string(),
+        mcp_http_port: 0,
+        mcp_auth_token: None,
+        mcp_allowed_hosts: None,
+        mcp_allowed_origins: None,
+        mcp_keep_alive: 300,
+        mcp_max_media_bytes: 50 * 1024 * 1024,
+        mcp_oauth_enabled: false,
+        mcp_oauth_storage_path: "/tmp/unused-http-cors-tests.json".to_string(),
+        mcp_oauth_storage_key: None,
+        mcp_oauth_public_url: None,
+    }
 }
 
-async fn spawn(app: Router) -> String {
+fn oauth_test_config(store_path: &std::path::Path) -> Config {
+    let key = {
+        use base64::Engine as _;
+        base64::engine::general_purpose::STANDARD.encode([7u8; 32])
+    };
+    Config {
+        gramps_username: None,
+        gramps_password: None,
+        mcp_oauth_enabled: true,
+        mcp_oauth_storage_path: store_path.to_string_lossy().into_owned(),
+        mcp_oauth_storage_key: Some(key.into()),
+        mcp_oauth_public_url: Some(
+            "https://mcp.invalid"
+                .parse()
+                .expect("test issuer should be a valid URL"),
+        ),
+        ..test_config()
+    }
+}
+
+async fn spawn(app: axum::Router) -> String {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("binding to an ephemeral local port should succeed");
@@ -55,48 +85,14 @@ async fn spawn(app: Router) -> String {
     format!("http://{addr}")
 }
 
-fn static_token_app(token: &str) -> Router {
-    Router::new()
-        .route("/mcp", any(|| async { "ok" }))
-        .route_layer(axum::middleware::from_fn_with_state(
-            SecretString::from(token.to_string()),
-            bearer_auth_middleware,
-        ))
-}
-
-async fn oauth_app() -> Router {
-    let store_path = std::env::temp_dir().join(format!("cors-test-{}.json", std::process::id()));
-    let key = {
-        use base64::Engine as _;
-        base64::engine::general_purpose::STANDARD.encode([7u8; 32])
-    };
-    let store = oauth::Store::open(&store_path, &key)
-        .await
-        .expect("oauth store should open at a fresh temp path");
-    let state = Arc::new(oauth::OAuthState {
-        store,
-        api_url: "http://gramps.invalid"
-            .parse()
-            .expect("test api url should be a valid URL"),
-        http: reqwest::Client::new(),
-        issuer: "https://mcp.invalid"
-            .parse()
-            .expect("test issuer should be a valid URL"),
-        max_media_bytes: 50 * 1024 * 1024,
-    });
-
-    Router::new()
-        .route("/mcp", any(|| async { "ok" }))
-        .route_layer(axum::middleware::from_fn_with_state(
-            state.clone(),
-            oauth::identity_middleware,
-        ))
-        .merge(oauth::router(state))
-}
-
 #[tokio::test]
 async fn static_token_mode_sends_no_cors_headers_on_preflight() {
-    let base_url = spawn(static_token_app("secret-token")).await;
+    let config = Config {
+        mcp_auth_token: Some("secret-token".to_string().into()),
+        ..test_config()
+    };
+    let app = build_app(config).await.unwrap();
+    let base_url = spawn(app).await;
     let http = reqwest::Client::new();
 
     let resp = http
@@ -115,7 +111,12 @@ async fn static_token_mode_sends_no_cors_headers_on_preflight() {
 
 #[tokio::test]
 async fn static_token_mode_post_without_origin_is_unaffected() {
-    let base_url = spawn(static_token_app("secret-token")).await;
+    let config = Config {
+        mcp_auth_token: Some("secret-token".to_string().into()),
+        ..test_config()
+    };
+    let app = build_app(config).await.unwrap();
+    let base_url = spawn(app).await;
     let http = reqwest::Client::new();
 
     // No bearer token -> still 401, same as before CORS removal.
@@ -126,14 +127,16 @@ async fn static_token_mode_post_without_origin_is_unaffected() {
         .get("access-control-allow-origin")
         .is_none());
 
-    // Correct bearer token -> reaches the handler, same as before.
+    // Correct bearer token -> auth passes and the request reaches the real
+    // MCP service (which then rejects the empty body on its own terms —
+    // irrelevant here, this test only cares that auth/CORS let it through).
     let authed = http
         .post(format!("{base_url}/mcp"))
         .bearer_auth("secret-token")
         .send()
         .await
         .unwrap();
-    assert_eq!(authed.status(), reqwest::StatusCode::OK);
+    assert_ne!(authed.status(), reqwest::StatusCode::UNAUTHORIZED);
     assert!(authed
         .headers()
         .get("access-control-allow-origin")
@@ -142,7 +145,9 @@ async fn static_token_mode_post_without_origin_is_unaffected() {
 
 #[tokio::test]
 async fn oauth_mode_sends_no_cors_headers_on_preflight() {
-    let base_url = spawn(oauth_app().await).await;
+    let store_path = std::env::temp_dir().join(format!("cors-test-{}.json", std::process::id()));
+    let app = build_app(oauth_test_config(&store_path)).await.unwrap();
+    let base_url = spawn(app).await;
     let http = reqwest::Client::new();
 
     let resp = http
@@ -157,11 +162,16 @@ async fn oauth_mode_sends_no_cors_headers_on_preflight() {
         "expected no Access-Control-Allow-Origin header, got: {:?}",
         resp.headers()
     );
+
+    let _ = std::fs::remove_file(&store_path);
 }
 
 #[tokio::test]
 async fn oauth_mode_post_without_origin_is_unaffected() {
-    let base_url = spawn(oauth_app().await).await;
+    let store_path =
+        std::env::temp_dir().join(format!("cors-test-oauth-{}.json", std::process::id()));
+    let app = build_app(oauth_test_config(&store_path)).await.unwrap();
+    let base_url = spawn(app).await;
     let http = reqwest::Client::new();
 
     // No Authorization header -> 401 with a WWW-Authenticate challenge,
@@ -173,12 +183,18 @@ async fn oauth_mode_post_without_origin_is_unaffected() {
         .headers()
         .get("access-control-allow-origin")
         .is_none());
+
+    let _ = std::fs::remove_file(&store_path);
 }
 
 #[tokio::test]
 async fn configured_origins_are_reflected_on_preflight() {
-    let app = static_token_app("secret-token")
-        .layer(cors_layer(vec!["https://good.example".to_string()]));
+    let config = Config {
+        mcp_auth_token: Some("secret-token".to_string().into()),
+        mcp_allowed_origins: Some("https://good.example".to_string()),
+        ..test_config()
+    };
+    let app = build_app(config).await.unwrap();
     let base_url = spawn(app).await;
     let http = reqwest::Client::new();
 
@@ -201,8 +217,12 @@ async fn configured_origins_are_reflected_on_preflight() {
 
 #[tokio::test]
 async fn unlisted_origin_gets_no_cors_headers_even_when_others_are_configured() {
-    let app = static_token_app("secret-token")
-        .layer(cors_layer(vec!["https://good.example".to_string()]));
+    let config = Config {
+        mcp_auth_token: Some("secret-token".to_string().into()),
+        mcp_allowed_origins: Some("https://good.example".to_string()),
+        ..test_config()
+    };
+    let app = build_app(config).await.unwrap();
     let base_url = spawn(app).await;
     let http = reqwest::Client::new();
 

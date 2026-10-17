@@ -152,7 +152,7 @@ async fn full_authorization_code_flow_reaches_a_real_gramps_identity() {
             ("code_challenge", &challenge),
             ("code_challenge_method", "S256"),
             ("response_type", "code"),
-            ("username", common::TEST_USER),
+            ("username", fixture.username.as_str()),
             ("password", common::TEST_PASS),
         ])
         .send()

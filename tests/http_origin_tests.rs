@@ -12,26 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `src/main.rs` wires `MCP_ALLOWED_ORIGINS` into rmcp's own `Origin`
-//! check on `/mcp` (`StreamableHttpServerConfig::enforce_origin_validation`
-//! when unset, `with_allowed_origins` when set) — not our `CorsLayer`,
-//! which only governs whether a browser is *allowed to read* a response.
-//! rmcp's check runs for every request, browser or not, before any
-//! MCP/session logic, and rejects a disallowed `Origin` outright with
-//! `403`. These tests mount the real `GrampsMcpServer` behind
-//! `StreamableHttpService` (no Gramps backend needed — constructing it
-//! does no network I/O) to exercise that check directly, independent of
+//! `build_app` wires `MCP_ALLOWED_ORIGINS` into rmcp's own `Origin` check on
+//! `/mcp` (`StreamableHttpServerConfig::enforce_origin_validation` when
+//! unset, `with_allowed_origins` when set) — not the `CorsLayer`, which only
+//! governs whether a browser is *allowed to read* a response. rmcp's check
+//! runs for every request, browser or not, before any MCP/session logic,
+//! and rejects a disallowed `Origin` outright with `403`. These tests build
+//! the real router via `build_app` (no Gramps backend needed — constructing
+//! it does no network I/O) to exercise that check directly, independent of
 //! the CORS layer covered in `tests/http_cors_tests.rs`.
 
-use std::sync::Arc;
-
-use axum::Router;
 use gramps_web_mcp_rs::{
+    app::build_app,
     config::{Config, TransportMode},
-    server::GrampsMcpServer,
-};
-use rmcp::transport::streamable_http_server::{
-    session::local::LocalSessionManager, StreamableHttpServerConfig, StreamableHttpService,
 };
 
 fn test_config() -> Config {
@@ -57,16 +50,7 @@ fn test_config() -> Config {
     }
 }
 
-fn mcp_app(http_config: StreamableHttpServerConfig) -> Router {
-    let mcp_server =
-        GrampsMcpServer::new(test_config()).expect("test config should build a valid server");
-    let session_manager = Arc::new(LocalSessionManager::default());
-    let service =
-        StreamableHttpService::new(move || Ok(mcp_server.clone()), session_manager, http_config);
-    Router::new().nest_service("/mcp", service)
-}
-
-async fn spawn(app: Router) -> String {
+async fn spawn(app: axum::Router) -> String {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("binding to an ephemeral local port should succeed");
@@ -83,7 +67,7 @@ async fn spawn(app: Router) -> String {
 
 #[tokio::test]
 async fn default_enforcement_rejects_any_present_origin() {
-    let app = mcp_app(StreamableHttpServerConfig::default().enforce_origin_validation());
+    let app = build_app(test_config()).await.unwrap();
     let base_url = spawn(app).await;
     let http = reqwest::Client::new();
 
@@ -99,7 +83,7 @@ async fn default_enforcement_rejects_any_present_origin() {
 
 #[tokio::test]
 async fn default_enforcement_allows_requests_with_no_origin_header() {
-    let app = mcp_app(StreamableHttpServerConfig::default().enforce_origin_validation());
+    let app = build_app(test_config()).await.unwrap();
     let base_url = spawn(app).await;
     let http = reqwest::Client::new();
 
@@ -114,10 +98,11 @@ async fn default_enforcement_allows_requests_with_no_origin_header() {
 
 #[tokio::test]
 async fn allowed_origins_list_lets_listed_origin_through() {
-    let app = mcp_app(
-        StreamableHttpServerConfig::default()
-            .with_allowed_origins(vec!["https://good.example".to_string()]),
-    );
+    let config = Config {
+        mcp_allowed_origins: Some("https://good.example".to_string()),
+        ..test_config()
+    };
+    let app = build_app(config).await.unwrap();
     let base_url = spawn(app).await;
     let http = reqwest::Client::new();
 
@@ -133,10 +118,11 @@ async fn allowed_origins_list_lets_listed_origin_through() {
 
 #[tokio::test]
 async fn allowed_origins_list_still_rejects_unlisted_origin() {
-    let app = mcp_app(
-        StreamableHttpServerConfig::default()
-            .with_allowed_origins(vec!["https://good.example".to_string()]),
-    );
+    let config = Config {
+        mcp_allowed_origins: Some("https://good.example".to_string()),
+        ..test_config()
+    };
+    let app = build_app(config).await.unwrap();
     let base_url = spawn(app).await;
     let http = reqwest::Client::new();
 

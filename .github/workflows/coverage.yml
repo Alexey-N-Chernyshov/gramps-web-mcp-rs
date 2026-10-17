@@ -13,114 +13,71 @@ env:
   RUSTFLAGS: -D warnings
 
 jobs:
-  # Builds the coverage-matrix leg list from whatever's actually in
-  # `tests/*.rs` right now, plus the fixed `unit` leg (`--lib --bins`), so
-  # a new integration test file is picked up automatically instead of
-  # needing a matching matrix entry added by hand.
-  discover-tests:
-    name: Discover integration test files
-    runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.list.outputs.matrix }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - id: list
-        run: |
-          matrix=$(
-            for f in tests/*.rs; do basename "$f" .rs; done \
-              | jq -R -s -c '
-                  split("\n") | map(select(length > 0)) |
-                  map({name: ., args: ("--test " + .)})
-                ' \
-              | jq -c '[{name: "unit", args: "--lib --bins"}] + .'
-          )
-          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
-
-  coverage-warmup:
-    name: Warm coverage build cache
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - name: Install Rust toolchain
-        run: rustup toolchain install stable --profile minimal --component llvm-tools-preview
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          shared-key: coverage
-      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
-        with:
-          tool: cargo-llvm-cov
-
-      - name: Pre-build lib + all test binaries under coverage instrumentation
-        run: |
-          eval "$(cargo llvm-cov show-env --export-prefix)"
-          export CARGO_TARGET_DIR="$CARGO_LLVM_COV_TARGET_DIR/llvm-cov-target"
-          cargo build --tests
-
-  coverage-matrix:
-    name: Coverage (${{ matrix.name }})
-    needs: [coverage-warmup, discover-tests]
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include: ${{ fromJson(needs.discover-tests.outputs.matrix) }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - name: Install Rust toolchain
-        run: rustup toolchain install stable --profile minimal --component llvm-tools-preview
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          shared-key: coverage
-      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
-        with:
-          tool: cargo-llvm-cov
-
-      - name: Run coverage (${{ matrix.name }})
-        run: cargo llvm-cov ${{ matrix.args }} --lcov --output-path lcov.info
-
-      - name: Upload lcov artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: lcov-${{ matrix.name }}
-          path: lcov.info
-          retention-days: 1
-
-  # Required-status-check aggregator: branch protection targets this stable
-  # job name instead of the per-matrix-leg names above, which change
-  # whenever a test file is added/removed/renamed.
+  # Single job: the whole test suite shares one Gramps Web instance via `GRAMPS_TEST_URL`
+  # instead of each integration test file spinning up its own docker-compose stack through
+  # testcontainers (see tests/support/helpers.rs). Nothing here names individual test files —
+  # `--tests` picks up whatever's in `tests/*.rs` automatically.
   coverage:
     name: Coverage
-    needs: coverage-matrix
-    if: always()
     runs-on: ubuntu-latest
     steps:
-      - name: Check matrix result
-        run: |
-          if [ "${{ needs.coverage-matrix.result }}" != "success" ]; then
-            echo "One or more coverage matrix legs failed"
-            exit 1
-          fi
-
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
 
-      - name: Download lcov artifacts
-        uses: actions/download-artifact@v8
+      # Backgrounded and not waited for here at all: the test fixture itself waits for
+      # readiness (GET /ready, see tests/support/helpers.rs) once GRAMPS_TEST_URL is set, so
+      # this just needs to be kicked off before "Run coverage" — the image pull + container
+      # start overlap with the toolchain/cache steps below instead of blocking in front of
+      # them. docker-compose.ci.yml fixes the host port so the URL is known upfront.
+      - name: Start Gramps Web test stack (background)
+        run: |
+          nohup docker compose -f docker-compose.test.yml -f docker-compose.ci.yml up -d \
+            > compose.log 2>&1 &
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal --component llvm-tools-preview
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          pattern: lcov-*
-          path: coverage-reports
-          merge-multiple: false
+          shared-key: coverage-v2
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+        with:
+          tool: cargo-llvm-cov
+
+      # Builds/runs via plain `cargo test` (coverage-instrumented through show-env's exported
+      # RUSTC_WRAPPER etc.), not `cargo llvm-cov --lib --bins --tests` directly: that writes
+      # to a nested target/llvm-cov-target/ that rust-cache's restore doesn't make reusable
+      # across runs — every run recompiles every dependency from scratch despite a cache hit.
+      # Plain `cargo test` builds into the ordinary target/debug/ instead, which does get
+      # reused. `cargo llvm-cov report` only turns the resulting profile data into lcov.info;
+      # it doesn't build or run anything itself.
+      - name: Run coverage
+        env:
+          GRAMPS_TEST_URL: http://localhost:5055
+        run: |
+          show_env=$(cargo llvm-cov show-env)
+          while IFS= read -r line; do
+            key=${line%%=*}
+            value=${line#*=}
+            value=${value#\'}
+            value=${value%\'}
+            export "${key}=${value}"
+          done <<< "$show_env"
+
+          cargo test --lib --bins --tests
+          cargo llvm-cov report --lcov --output-path lcov.info
+
+      # Runner is thrown away after the job either way, so there's no teardown step —
+      # only logs, and only when something actually went wrong.
+      - name: Show Gramps Web logs
+        if: failure()
+        run: |
+          cat compose.log
+          docker compose -f docker-compose.test.yml -f docker-compose.ci.yml logs
 
       - name: Upload to Codecov
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
-          directory: coverage-reports
+          files: lcov.info
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: ${{ github.event.pull_request.head.repo.fork != true }}

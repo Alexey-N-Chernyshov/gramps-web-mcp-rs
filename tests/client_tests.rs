@@ -30,7 +30,7 @@ async fn auth_fails_with_wrong_password() {
     let http = reqwest::Client::new();
     let auth = AuthManager::new(
         api_url.clone(),
-        common::TEST_USER.to_string(),
+        fixture.username.clone(),
         "wrongpassword".to_string().into(),
         http.clone(),
     );

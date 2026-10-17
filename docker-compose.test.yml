@@ -1,8 +1,34 @@
 services:
   grampsweb-test:
     image: ghcr.io/gramps-project/grampsweb:26.10.1
+    # Multi-tree mode (GRAMPSWEB_TREE: "*") skips the single-tree startup bootstrap that
+    # normally creates `/root/.gramps/grampsdb` (the parent directory every tree's own
+    # subdirectory lives under) — without it, the first `POST /api/trees/` fails with
+    # ENOENT. Single-tree mode gets this for free; multi-tree mode needs it created by hand.
+    entrypoint: /docker-entrypoint.sh
+    command: >
+      sh -c "mkdir -p /root/.gramps/grampsdb &&
+             gunicorn -w ${GUNICORN_NUM_WORKERS:-8} -b 0.0.0.0:5000 gramps_webapi.wsgi:app
+             --timeout ${GUNICORN_TIMEOUT:-120} --limit-request-line 8190"
     ports:
       - "5000"
     environment:
-      GRAMPSWEB_TREE: testdb
+      # "*" = multi-tree mode: one shared server, a fresh tree + user per test (see
+      # tests/support/helpers.rs) instead of a fresh container per test.
+      GRAMPSWEB_TREE: "*"
       GRAMPSWEB_SECRET_KEY: integration-test-secret
+      # /api/token/ and user creation are limited to 1/second by default, which many tests
+      # creating their own tree+user in parallel blow through immediately. Verified this
+      # flag actually disables flask-limiter (no retry-with-backoff needed in the fixture).
+      GRAMPSWEB_RATELIMIT_ENABLED: "false"
+      # Without this, media storage is a single shared directory across all trees (Gramps
+      # Web itself warns this "exposes media files to users belonging to different trees").
+      GRAMPSWEB_MEDIA_PREFIX_TREE: "true"
+    # Readiness = gunicorn accepting TCP connections, not a 200 — every real endpoint
+    # requires auth and 401s until a user exists, which curl/wget would treat as failure.
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import socket; socket.create_connection(('localhost', 5000), timeout=2).close()"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
