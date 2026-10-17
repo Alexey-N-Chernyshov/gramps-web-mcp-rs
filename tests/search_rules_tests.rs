@@ -205,6 +205,51 @@ async fn get_object_collection_pagination_and_gramps_id() {
 }
 
 #[tokio::test]
+async fn get_object_by_gramps_id_returns_single_object_not_array() {
+    let fixture = common::TestFixture::new().await;
+    let client = &fixture.client;
+
+    let handle = create::create_person(client, CreatePersonRequest::default())
+        .await
+        .unwrap();
+    let obj = get::get_object_by_handle(client, "people", &handle)
+        .await
+        .unwrap();
+    let gramps_id = obj["gramps_id"].as_str().expect("gramps_id missing");
+
+    let by_id = get::get_object_by_gramps_id(client, "people", gramps_id)
+        .await
+        .unwrap();
+    assert!(
+        by_id.is_object(),
+        "get_object_by_gramps_id should return a single object, not an array; got {by_id}"
+    );
+    assert_eq!(by_id["handle"].as_str(), Some(handle.as_str()));
+
+    delete::delete_object(client, "people", &handle)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn get_object_by_gramps_id_missing_returns_not_found() {
+    let fixture = common::TestFixture::new().await;
+    let client = &fixture.client;
+
+    let err = get::get_object_by_gramps_id(client, "people", "NONEXISTENT_GRAMPS_ID")
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, gramps_web_mcp_rs::client::Error::NotFound(_)),
+        "got: {err:?}"
+    );
+}
+
+// The ambiguous-match (gramps_id matching >1 object) branch is covered by a unit test on
+// `resolve_gramps_id_match` in src/tools/get.rs — Gramps Web enforces gramps_id uniqueness
+// server-side, so a genuine collision isn't reproducible through the live API.
+
+#[tokio::test]
 async fn search_pagination() {
     let fixture = common::TestFixture::new().await;
     let client = &fixture.client;

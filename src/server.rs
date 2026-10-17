@@ -28,8 +28,8 @@ use params::{
     CreateCitationInput, CreateEventInput, CreateFamilyInput, CreateMediaInput, CreateNoteInput,
     CreatePersonInput, CreatePlaceInput, CreateRepositoryInput, CreateSourceInput, CreateTagInput,
     DeleteObjectInput, GetMediaFileInput, GetObjectInput, HandleInput, HandlePairInput,
-    MergeFamilyInput, MergeInput, MergePersonInput, ObjectTypeInput, QueryObjectInput,
-    ReplaceMediaFileInput, SearchInput, UpdateInput,
+    ListObjectsInput, MergeFamilyInput, MergeInput, MergePersonInput, ObjectTypeInput,
+    QueryObjectInput, ReplaceMediaFileInput, SearchInput, UpdateInput,
 };
 use rmcp::{
     handler::server::{
@@ -194,7 +194,7 @@ Use `page`/`pagesize` to paginate large result sets (default page=1, pagesize=20
     // ── Get ─────────────────────────────────────────────────────────────────
 
     #[tool(
-        description = "Get the native Gramps filter rule reference for get_object's \
+        description = "Get the native Gramps filter rule reference for list_objects's \
 `rules` field: the generic {function, invert, rules} shape, the recommended `MatchesQuery` \
 (GOQL) rule, and how to discover the full rule catalog via get_filter_rules. \
 Call this before writing a `rules` filter."
@@ -207,7 +207,7 @@ Call this before writing a `rules` filter."
 
     #[tool(description = "\
 Get the live catalog of native Gramps filter rules for one object type — name, \
-description, and parameter types for every rule usable in get_object's `rules` field \
+description, and parameter types for every rule usable in list_objects's `rules` field \
 (including `MatchesQuery`, a GOQL expression). Call this when get_rules_reference's \
 MatchesQuery/GOQL isn't expressive enough and you need a rule from Gramps' own catalog \
 (e.g. date-range or relationship rules). `object_type` is required, as a quoted string: \
@@ -231,20 +231,17 @@ or \"repository\" (not \"tag\" — it has no rule catalog upstream).")]
     }
 
     #[tool(description = "\
-Get genealogy objects you can already identify — by `handle`, `gramps_id`, \
-or a `rules` filter — or browse a collection with `page`/`pagesize`. \
-`object_type` is always required, as a quoted string: \"person\", \"family\", \"event\", \"place\", \
-\"note\", \"citation\", \"source\", \"media\", \"repository\", or \"tag\". \
-Use `rules` for structured filtering (call get_rules_reference for syntax).")]
+Get one already-identified genealogy object, by `handle` or `gramps_id` (exactly one \
+required). `object_type` is always required, as a quoted string: \"person\", \"family\", \
+\"event\", \"place\", \"note\", \"citation\", \"source\", \"media\", \"repository\", or \"tag\". \
+To find objects you don't already have a handle/gramps_id for, use `search`, `list_objects`, \
+or `query_object` instead.")]
     async fn get_object(
         &self,
         Parameters(GetObjectInput {
             object_type,
             handle,
             gramps_id,
-            rules,
-            page,
-            pagesize,
         }): Parameters<GetObjectInput>,
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
@@ -255,25 +252,49 @@ Use `rules` for structured filtering (call get_rules_reference for syntax).")]
                  \"person\", \"family\", \"event\", \"place\", \"note\", \"citation\", \"source\", \"media\", \"repository\", \"tag\"",
             )]));
         };
-        let result = if let Some(h) = handle {
-            get::get_object_by_handle(&client, object_type.as_endpoint(), &h).await
-        } else if gramps_id.is_some() || rules.is_some() || page.is_some() || pagesize.is_some() {
-            get::get_object_collection(
-                &client,
-                object_type.as_endpoint(),
-                gramps_id.as_deref(),
-                rules.as_ref(),
-                page,
-                pagesize,
-            )
+        let lookup = match get::resolve_object_lookup(handle, gramps_id) {
+            Ok(lookup) => lookup,
+            Err(msg) => return Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
+        };
+        get::get_object(&client, object_type.as_endpoint(), lookup)
             .await
-        } else {
+            .map_or_else(api_err, ok_json)
+    }
+
+    #[tool(description = "\
+Browse or filter a collection of genealogy objects using native Gramps `rules` (e.g. \
+relationship, ancestor/descendant, or tag-based rules — call get_rules_reference for \
+syntax), or just page through all objects of a type when `rules` is omitted. \
+`object_type` is always required, as a quoted string: \"person\", \"family\", \"event\", \
+\"place\", \"note\", \"citation\", \"source\", \"media\", \"repository\", or \"tag\". \
+Use `page`/`pagesize` to paginate (default page=1, pagesize=20).")]
+    async fn list_objects(
+        &self,
+        Parameters(ListObjectsInput {
+            object_type,
+            rules,
+            page,
+            pagesize,
+        }): Parameters<ListObjectsInput>,
+        context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResult, McpError> {
+        let client = self.client_for(&context)?;
+        let Some(object_type) = object_type else {
             return Ok(CallToolResult::error(vec![ContentBlock::text(
-                "Provide `handle` for a single object, \
-                 or `gramps_id` / `rules` / `page` / `pagesize` to browse a collection.",
+                "`object_type` is required. Specify one of: \
+                 \"person\", \"family\", \"event\", \"place\", \"note\", \"citation\", \"source\", \"media\", \"repository\", \"tag\"",
             )]));
         };
-        result.map_or_else(api_err, ok_json)
+        get::get_object_collection(
+            &client,
+            object_type.as_endpoint(),
+            None,
+            rules.as_ref(),
+            page,
+            pagesize,
+        )
+        .await
+        .map_or_else(api_err, ok_json)
     }
 
     #[tool(
@@ -289,13 +310,13 @@ Call this before writing a where_expr."
 
     #[tool(description = "\
 Fast structured query — filter/sort/page a collection of one object type via a SQL-compiled \
-backend (POST .../query/). `where_expr` is the same GOQL language as get_object's \
+backend (POST .../query/). `where_expr` is the same GOQL language as list_objects's \
 `rules: {\"name\": \"MatchesQuery\", ...}`, but this tool also gives you `select` (pick \
 columns), `order_by`, and efficient `after`-cursor pagination (from the previous response's \
 `next_after`) instead of page/pagesize. `object_type` is required, as a quoted string: \
 \"person\", \"family\", \"event\", \"place\", \"note\", \"citation\", \"source\", \"media\", \
 \"repository\", or \"tag\". Call get_goql_reference for `where_expr` syntax; fall back to \
-get_object + `rules` when you need to combine multiple native Gramps rules.")]
+list_objects + `rules` when you need to combine multiple native Gramps rules.")]
     async fn query_object(
         &self,
         Parameters(QueryObjectInput {
@@ -1215,7 +1236,7 @@ impl ServerHandler for GrampsMcpServer {
         let rules_resource = Resource::new("gramps://rules-reference", "rules-reference")
             .with_title("Rules Reference")
             .with_description(
-                "Native Gramps filter rule syntax for get_object's `rules` field, including \
+                "Native Gramps filter rule syntax for list_objects's `rules` field, including \
                  the recommended MatchesQuery (GOQL) rule",
             )
             .with_mime_type("text/markdown");
@@ -1364,6 +1385,7 @@ mod tests {
             "get_goql_reference",
             "get_rules_reference",
             "get_object",
+            "list_objects",
             "delete_object",
         ] {
             assert!(

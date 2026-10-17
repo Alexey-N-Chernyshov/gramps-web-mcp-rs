@@ -106,20 +106,32 @@ pub struct GetObjectInput {
     /// Required. A quoted string, one of: "person", "family", "event", "place", "note", "citation", "source", "media", "repository", "tag".
     #[schemars(required)]
     pub object_type: Option<ObjectType>,
-    /// Handle of a specific object — returns a single record.
+    /// Handle of a specific, already-known object. Exactly one of `handle`/`gramps_id` is required.
     pub handle: Option<String>,
-    /// Filter by Gramps ID (e.g. "I0001") — returns a collection.
+    /// Gramps ID of a specific, already-known object (e.g. "I0001"). Exactly one of
+    /// `handle`/`gramps_id` is required. Gramps IDs are not guaranteed unique, so if more
+    /// than one object matches, this returns an error listing their handles instead of a
+    /// single object.
     pub gramps_id: Option<String>,
-    /// Native Gramps filter rule expression — returns a collection. Simplest form wraps a
-    /// GOQL expression: {"rules": [{"name": "MatchesQuery", "values": ["<goql expr>"]}]}
+}
+
+#[derive(Deserialize, JsonSchema, Debug)]
+pub struct ListObjectsInput {
+    /// Required. A quoted string, one of: "person", "family", "event", "place", "note", "citation", "source", "media", "repository", "tag".
+    #[schemars(required)]
+    pub object_type: Option<ObjectType>,
+    /// Native Gramps filter rule expression. Simplest form wraps a GOQL expression:
+    /// {"rules": [{"name": "MatchesQuery", "values": ["<goql expr>"]}]}
     /// (call get_goql_reference for GOQL syntax). For the full native rule catalog call
     /// get_filter_rules. Full shape: {"function": "and"|"or"|"one", "invert": bool,
-    /// "rules": [{"name": str, "values": [...], "regex": bool}]}.
-    #[schemars(schema_with = "json_object_schema")]
+    /// "rules": [{"name": str, "values": [...], "regex": bool}]}. Omit to browse all objects
+    /// of this type.
+    #[serde(default)]
+    #[schemars(schema_with = "json_object_or_null_schema")]
     pub rules: Option<serde_json::Value>,
-    /// Page number (1-based) for paginated collection results.
+    /// Page number (1-based). Defaults to 1 if `pagesize` is given.
     pub page: Option<u32>,
-    /// Results per page for collection results (default 20).
+    /// Results per page (default 20).
     pub pagesize: Option<u32>,
 }
 
@@ -245,6 +257,13 @@ pub struct MergeFamilyInput {
 
 fn json_object_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
     schemars::json_schema!({ "type": "object" })
+}
+
+/// Like `json_object_schema`, but also accepts `null` — for `Option<Value>` fields where a
+/// `schema_with` override would otherwise make the field show as required (a plain
+/// `{"type": "object"}` subschema doesn't admit null, so schemars can't tell it's optional).
+fn json_object_or_null_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({ "type": ["object", "null"] })
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -417,6 +436,39 @@ mod tests {
             data_schema["type"].as_str(),
             Some("object"),
             "data field schema must constrain type to 'object', got: {data_schema}"
+        );
+    }
+
+    #[test]
+    fn get_object_schema_only_requires_object_type() {
+        let schema = schemars::schema_for!(GetObjectInput);
+        let schema_json = serde_json::to_value(&schema).unwrap();
+        let required: Vec<&str> = schema_json["required"]
+            .as_array()
+            .map(|a| a.iter().filter_map(|v| v.as_str()).collect())
+            .unwrap_or_default();
+        assert_eq!(
+            required,
+            vec!["object_type"],
+            "handle/gramps_id must stay optional in the schema (exactly-one-of is enforced \
+             at the handler level), got required: {required:?}"
+        );
+    }
+
+    #[test]
+    fn list_objects_schema_only_requires_object_type() {
+        let schema = schemars::schema_for!(ListObjectsInput);
+        let schema_json = serde_json::to_value(&schema).unwrap();
+        let required: Vec<&str> = schema_json["required"]
+            .as_array()
+            .map(|a| a.iter().filter_map(|v| v.as_str()).collect())
+            .unwrap_or_default();
+        assert_eq!(
+            required,
+            vec!["object_type"],
+            "rules/page/pagesize must not show as required (regression: a bare \
+             `schema_with` object schema doesn't admit null, so schemars can't tell \
+             Option<Value> is optional), got required: {required:?}"
         );
     }
 }

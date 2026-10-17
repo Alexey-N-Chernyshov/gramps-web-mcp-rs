@@ -1,6 +1,6 @@
 # Rules Reference
 
-Used by `get_object`'s `rules` parameter — Gramps' own native filter-rule system (the same
+Used by `list_objects`'s `rules` parameter — Gramps' own native filter-rule system (the same
 mechanism behind the Custom Filter Editor in the desktop app).
 
 ## Shape
