@@ -37,7 +37,7 @@ async fn media_from_path_round_trip() {
     .await
     .unwrap();
 
-    let media = get::get_object_by_handle(client, "media", &handle)
+    let media = get::get_object_by_handle(client, "media", &handle, get::ReadOptions::default())
         .await
         .unwrap();
     assert_eq!(media["handle"].as_str(), Some(handle.as_str()));
@@ -47,7 +47,7 @@ async fn media_from_path_round_trip() {
     let mut body = media.clone();
     body["desc"] = serde_json::json!("Updated photo");
     update::update_media(client, &handle, &body).await.unwrap();
-    let updated = get::get_object_by_handle(client, "media", &handle)
+    let updated = get::get_object_by_handle(client, "media", &handle, get::ReadOptions::default())
         .await
         .unwrap();
     assert_eq!(updated["desc"].as_str(), Some("Updated photo"));
@@ -56,7 +56,7 @@ async fn media_from_path_round_trip() {
         .await
         .unwrap();
     assert!(matches!(
-        get::get_object_by_handle(client, "media", &handle).await,
+        get::get_object_by_handle(client, "media", &handle, get::ReadOptions::default()).await,
         Err(Error::NotFound(_))
     ));
 }
@@ -86,7 +86,7 @@ async fn media_from_url_round_trip() {
         .await
         .unwrap();
 
-    let media = get::get_object_by_handle(client, "media", &handle)
+    let media = get::get_object_by_handle(client, "media", &handle, get::ReadOptions::default())
         .await
         .unwrap();
     assert_eq!(media["handle"].as_str(), Some(handle.as_str()));
@@ -114,7 +114,7 @@ async fn media_from_url_round_trip() {
     let mut body = media.clone();
     body["desc"] = serde_json::json!("Updated downloaded photo");
     update::update_media(client, &handle, &body).await.unwrap();
-    let updated = get::get_object_by_handle(client, "media", &handle)
+    let updated = get::get_object_by_handle(client, "media", &handle, get::ReadOptions::default())
         .await
         .unwrap();
     assert_eq!(updated["desc"].as_str(), Some("Updated downloaded photo"));
@@ -123,7 +123,7 @@ async fn media_from_url_round_trip() {
         .await
         .unwrap();
     assert!(matches!(
-        get::get_object_by_handle(client, "media", &handle).await,
+        get::get_object_by_handle(client, "media", &handle, get::ReadOptions::default()).await,
         Err(Error::NotFound(_))
     ));
 }

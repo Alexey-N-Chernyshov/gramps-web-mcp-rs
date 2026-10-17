@@ -53,7 +53,7 @@ async fn media_from_bytes_jpeg_round_trip() {
             .await
             .unwrap();
 
-    let stored = get::get_object_by_handle(client, "media", &handle)
+    let stored = get::get_object_by_handle(client, "media", &handle, get::ReadOptions::default())
         .await
         .unwrap();
     assert_eq!(stored["handle"].as_str(), Some(handle.as_str()));
@@ -99,7 +99,7 @@ async fn media_from_bytes_pdf_round_trip() {
     .await
     .unwrap();
 
-    let stored = get::get_object_by_handle(client, "media", &handle)
+    let stored = get::get_object_by_handle(client, "media", &handle, get::ReadOptions::default())
         .await
         .unwrap();
     assert_eq!(stored["mime"].as_str(), Some("application/pdf"));
@@ -126,7 +126,7 @@ async fn media_from_bytes_sets_privacy_at_creation() {
         .await
         .unwrap();
 
-    let stored = get::get_object_by_handle(client, "media", &handle)
+    let stored = get::get_object_by_handle(client, "media", &handle, get::ReadOptions::default())
         .await
         .unwrap();
     assert_eq!(
@@ -242,7 +242,7 @@ async fn replace_media_file_preserves_handle_and_metadata() {
             .await
             .unwrap();
 
-    let before = get::get_object_by_handle(client, "media", &handle)
+    let before = get::get_object_by_handle(client, "media", &handle, get::ReadOptions::default())
         .await
         .unwrap();
     let gramps_id = before["gramps_id"].as_str().unwrap_or_default().to_string();
@@ -262,7 +262,7 @@ async fn replace_media_file_preserves_handle_and_metadata() {
     assert_eq!(summary.mime, "application/pdf");
     assert_eq!(summary.size_bytes, replacement.len() as u64);
 
-    let after = get::get_object_by_handle(client, "media", &handle)
+    let after = get::get_object_by_handle(client, "media", &handle, get::ReadOptions::default())
         .await
         .unwrap();
     assert_eq!(
@@ -312,7 +312,7 @@ async fn replace_media_file_mime_mismatch_rejected() {
     let handle = media::create_media_from_bytes(client, original, None, None, None)
         .await
         .unwrap();
-    let before = get::get_object_by_handle(client, "media", &handle)
+    let before = get::get_object_by_handle(client, "media", &handle, get::ReadOptions::default())
         .await
         .unwrap();
 
@@ -330,7 +330,7 @@ async fn replace_media_file_mime_mismatch_rejected() {
     assert_eq!(err.handle.as_deref(), Some(handle.as_str()));
     assert!(matches!(err.source, Error::Validation(_)), "got: {err:?}");
 
-    let after = get::get_object_by_handle(client, "media", &handle)
+    let after = get::get_object_by_handle(client, "media", &handle, get::ReadOptions::default())
         .await
         .unwrap();
     assert_eq!(
@@ -353,7 +353,7 @@ async fn replace_media_file_expected_checksum_mismatch_rejected() {
     let handle = media::create_media_from_bytes(client, original, None, None, None)
         .await
         .unwrap();
-    let before = get::get_object_by_handle(client, "media", &handle)
+    let before = get::get_object_by_handle(client, "media", &handle, get::ReadOptions::default())
         .await
         .unwrap();
 
@@ -365,7 +365,7 @@ async fn replace_media_file_expected_checksum_mismatch_rejected() {
     assert_eq!(err.handle.as_deref(), Some(handle.as_str()));
     assert!(matches!(err.source, Error::Validation(_)), "got: {err:?}");
 
-    let after = get::get_object_by_handle(client, "media", &handle)
+    let after = get::get_object_by_handle(client, "media", &handle, get::ReadOptions::default())
         .await
         .unwrap();
     assert_eq!(after["checksum"].as_str(), before["checksum"].as_str());

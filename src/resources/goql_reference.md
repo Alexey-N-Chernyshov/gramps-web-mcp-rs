@@ -1,7 +1,7 @@
 # GOQL — Gramps Object Query Language Reference
 
 Used by `query_object`'s `where_expr`, and recommended as the `values` of a `MatchesQuery`
-rule in `get_object`'s `rules` (see `get_rules_reference`) — same expression language
+rule in `list_objects`'s `rules` (see `get_rules_reference`) — same expression language
 either way.
 
 ## Overview

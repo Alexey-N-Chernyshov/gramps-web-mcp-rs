@@ -40,7 +40,7 @@ async fn event_round_trip() {
     .await
     .unwrap();
 
-    let event = get::get_object_by_handle(client, "events", &handle)
+    let event = get::get_object_by_handle(client, "events", &handle, get::ReadOptions::default())
         .await
         .unwrap();
     assert_eq!(event["description"].as_str(), Some("Test birth event"));
@@ -49,7 +49,7 @@ async fn event_round_trip() {
     let mut body = event.clone();
     body["description"] = serde_json::json!("Updated description");
     update::update_event(client, &handle, &body).await.unwrap();
-    let updated = get::get_object_by_handle(client, "events", &handle)
+    let updated = get::get_object_by_handle(client, "events", &handle, get::ReadOptions::default())
         .await
         .unwrap();
     assert_eq!(updated["description"].as_str(), Some("Updated description"));
@@ -58,7 +58,7 @@ async fn event_round_trip() {
         .await
         .unwrap();
     assert!(matches!(
-        get::get_object_by_handle(client, "events", &handle).await,
+        get::get_object_by_handle(client, "events", &handle, get::ReadOptions::default()).await,
         Err(Error::NotFound(_))
     ));
 }
@@ -82,7 +82,7 @@ async fn place_round_trip() {
     .await
     .unwrap();
 
-    let place = get::get_object_by_handle(client, "places", &handle)
+    let place = get::get_object_by_handle(client, "places", &handle, get::ReadOptions::default())
         .await
         .unwrap();
     assert_eq!(place["title"].as_str(), Some("Moscow"));
@@ -90,7 +90,7 @@ async fn place_round_trip() {
     let mut body = place.clone();
     body["title"] = serde_json::json!("Saint Petersburg");
     update::update_place(client, &handle, &body).await.unwrap();
-    let updated = get::get_object_by_handle(client, "places", &handle)
+    let updated = get::get_object_by_handle(client, "places", &handle, get::ReadOptions::default())
         .await
         .unwrap();
     assert_eq!(updated["title"].as_str(), Some("Saint Petersburg"));
@@ -99,7 +99,7 @@ async fn place_round_trip() {
         .await
         .unwrap();
     assert!(matches!(
-        get::get_object_by_handle(client, "places", &handle).await,
+        get::get_object_by_handle(client, "places", &handle, get::ReadOptions::default()).await,
         Err(Error::NotFound(_))
     ));
 }
@@ -174,7 +174,7 @@ async fn partial_update_preserves_place_note_list() {
     .await
     .unwrap();
 
-    let updated = get::get_object_by_handle(client, "places", &handle)
+    let updated = get::get_object_by_handle(client, "places", &handle, get::ReadOptions::default())
         .await
         .unwrap();
     assert_eq!(updated["title"].as_str(), Some("Saint Petersburg"));

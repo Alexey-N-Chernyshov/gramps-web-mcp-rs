@@ -41,6 +41,15 @@ fn validate_patch<'a>(
     Ok(patch)
 }
 
+/// The URL for update's own read-modify-write GET — deliberately never takes
+/// `keys`/`strip`/`profile` (see `fetch_path_has_no_query_params` below): any such filter
+/// would hand `current_obj` an incomplete object, and the PUT that follows replaces the
+/// record wholesale, so whatever the GET left out is gone for good. `profile` specifically
+/// is a read-only, server-computed summary — it must never round-trip into a PUT body.
+fn fetch_path(endpoint: &str, handle: &str) -> String {
+    format!("/api/{endpoint}/{handle}")
+}
+
 /// Read-modify-write a top-level patch onto the object at `/api/{endpoint}/{handle}`.
 ///
 /// Gramps Web's PUT replaces the object wholesale, so sending just the fields the caller
@@ -59,7 +68,7 @@ async fn update_with_merge(
 ) -> Result<serde_json::Value> {
     let patch = validate_patch(data, handle)?;
 
-    let mut current: serde_json::Value = client.get(&format!("/api/{endpoint}/{handle}")).await?;
+    let mut current: serde_json::Value = client.get(&fetch_path(endpoint, handle)).await?;
     let current_obj = current.as_object_mut().ok_or_else(|| {
         Error::Parse(format!(
             "expected GET /api/{endpoint}/{handle} to return a JSON object"
@@ -181,5 +190,17 @@ mod tests {
         let data = serde_json::json!({"handle": "H1", "gender": 1});
         let patch = validate_patch(&data, "H1").unwrap();
         assert_eq!(patch["gender"], 1);
+    }
+
+    #[test]
+    fn fetch_path_has_no_query_params() {
+        let path = fetch_path("people", "H1");
+        assert_eq!(path, "/api/people/H1");
+        assert!(
+            !path.contains('?'),
+            "update's own read-modify-write GET must fetch the full, unfiltered object \
+             (no keys/strip/etc.) — filtering it would silently drop whatever it excluded \
+             once the merged object is PUT back, got: {path}"
+        );
     }
 }
