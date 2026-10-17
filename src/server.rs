@@ -244,6 +244,7 @@ or `query_object` instead.")]
             handle,
             gramps_id,
             keys,
+            strip,
         }): Parameters<GetObjectInput>,
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
@@ -259,7 +260,11 @@ or `query_object` instead.")]
             Ok(lookup) => lookup,
             Err(msg) => return Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
         };
-        get::get_object(&client, endpoint, lookup, keys.as_deref())
+        let opts = get::ReadOptions {
+            keys: keys.as_deref(),
+            strip,
+        };
+        get::get_object(&client, endpoint, lookup, opts)
             .await
             .map_or_else(api_err, ok_json)
     }
@@ -279,6 +284,7 @@ Use `page`/`pagesize` to paginate (default page=1, pagesize=20).")]
             page,
             pagesize,
             keys,
+            strip,
         }): Parameters<ListObjectsInput>,
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
@@ -289,6 +295,10 @@ Use `page`/`pagesize` to paginate (default page=1, pagesize=20).")]
                  \"person\", \"family\", \"event\", \"place\", \"note\", \"citation\", \"source\", \"media\", \"repository\", \"tag\"",
             )]));
         };
+        let opts = get::ReadOptions {
+            keys: keys.as_deref(),
+            strip,
+        };
         get::get_object_collection(
             &client,
             object_type.as_endpoint(),
@@ -296,7 +306,7 @@ Use `page`/`pagesize` to paginate (default page=1, pagesize=20).")]
             rules.as_ref(),
             page,
             pagesize,
-            keys.as_deref(),
+            opts,
         )
         .await
         .map_or_else(api_err, ok_json)

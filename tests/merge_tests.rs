@@ -38,7 +38,7 @@ async fn merge_operations() {
         .unwrap();
     merge::merge_person(client, &p1, &p2, false).await.unwrap();
     assert!(matches!(
-        get::get_object_by_handle(client, "people", &p2, None).await,
+        get::get_object_by_handle(client, "people", &p2, get::ReadOptions::default()).await,
         Err(Error::NotFound(_))
     ));
     delete::delete_object(client, "people", &p1).await.unwrap();
@@ -54,7 +54,7 @@ async fn merge_operations() {
         .await
         .unwrap();
     assert!(matches!(
-        get::get_object_by_handle(client, "families", &f2, None).await,
+        get::get_object_by_handle(client, "families", &f2, get::ReadOptions::default()).await,
         Err(Error::NotFound(_))
     ));
     delete::delete_object(client, "families", &f1)
@@ -70,7 +70,7 @@ async fn merge_operations() {
         .unwrap();
     merge::merge_event(client, &e1, &e2).await.unwrap();
     assert!(matches!(
-        get::get_object_by_handle(client, "events", &e2, None).await,
+        get::get_object_by_handle(client, "events", &e2, get::ReadOptions::default()).await,
         Err(Error::NotFound(_))
     ));
     delete::delete_object(client, "events", &e1).await.unwrap();
@@ -84,7 +84,7 @@ async fn merge_operations() {
         .unwrap();
     merge::merge_place(client, &pl1, &pl2).await.unwrap();
     assert!(matches!(
-        get::get_object_by_handle(client, "places", &pl2, None).await,
+        get::get_object_by_handle(client, "places", &pl2, get::ReadOptions::default()).await,
         Err(Error::NotFound(_))
     ));
     delete::delete_object(client, "places", &pl1).await.unwrap();
@@ -94,7 +94,7 @@ async fn merge_operations() {
     let n2 = create::create_note(client, "note two", None).await.unwrap();
     merge::merge_note(client, &n1, &n2).await.unwrap();
     assert!(matches!(
-        get::get_object_by_handle(client, "notes", &n2, None).await,
+        get::get_object_by_handle(client, "notes", &n2, get::ReadOptions::default()).await,
         Err(Error::NotFound(_))
     ));
     delete::delete_object(client, "notes", &n1).await.unwrap();
@@ -123,7 +123,7 @@ async fn merge_operations() {
     let c2 = create::create_citation(client, &src2, None).await.unwrap();
     merge::merge_citation(client, &c1, &c2).await.unwrap();
     assert!(matches!(
-        get::get_object_by_handle(client, "citations", &c2, None).await,
+        get::get_object_by_handle(client, "citations", &c2, get::ReadOptions::default()).await,
         Err(Error::NotFound(_))
     ));
     delete::delete_object(client, "citations", &c1)
@@ -132,7 +132,7 @@ async fn merge_operations() {
 
     merge::merge_source(client, &src1, &src2).await.unwrap();
     assert!(matches!(
-        get::get_object_by_handle(client, "sources", &src2, None).await,
+        get::get_object_by_handle(client, "sources", &src2, get::ReadOptions::default()).await,
         Err(Error::NotFound(_))
     ));
     delete::delete_object(client, "sources", &src1)
@@ -147,7 +147,7 @@ async fn merge_operations() {
         .unwrap();
     merge::merge_repository(client, &r1, &r2).await.unwrap();
     assert!(matches!(
-        get::get_object_by_handle(client, "repositories", &r2, None).await,
+        get::get_object_by_handle(client, "repositories", &r2, get::ReadOptions::default()).await,
         Err(Error::NotFound(_))
     ));
     delete::delete_object(client, "repositories", &r1)
@@ -163,7 +163,7 @@ async fn merge_operations() {
         .unwrap();
     merge::merge_media(client, &m1, &m2).await.unwrap();
     assert!(matches!(
-        get::get_object_by_handle(client, "media", &m2, None).await,
+        get::get_object_by_handle(client, "media", &m2, get::ReadOptions::default()).await,
         Err(Error::NotFound(_))
     ));
     delete::delete_object(client, "media", &m1).await.unwrap();

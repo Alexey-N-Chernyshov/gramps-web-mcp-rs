@@ -89,11 +89,35 @@ pub async fn get_object(
     client: &GrampsClient,
     endpoint: &str,
     lookup: ObjectLookup,
-    keys: Option<&[String]>,
+    opts: ReadOptions<'_>,
 ) -> Result<serde_json::Value> {
     match lookup {
-        ObjectLookup::Handle(h) => get_object_by_handle(client, endpoint, &h, keys).await,
-        ObjectLookup::GrampsId(id) => get_object_by_gramps_id(client, endpoint, &id, keys).await,
+        ObjectLookup::Handle(h) => get_object_by_handle(client, endpoint, &h, opts).await,
+        ObjectLookup::GrampsId(id) => get_object_by_gramps_id(client, endpoint, &id, opts).await,
+    }
+}
+
+/// Extra query options shared by every read path (`get_object`'s handle/gramps_id lookups
+/// and `list_objects`'s collection browse) on top of their own structural parameters
+/// (gramps_id/rules/page/pagesize). `keys`/`strip` today; expected growth spot for
+/// `profile`/`handles`/`sort` — add a field here and a branch in `query_params`, not a new
+/// parameter on every function below.
+#[derive(Default, Clone, Copy)]
+pub struct ReadOptions<'a> {
+    pub keys: Option<&'a [String]>,
+    pub strip: Option<bool>,
+}
+
+impl ReadOptions<'_> {
+    fn query_params(&self) -> Vec<String> {
+        let mut params = Vec::new();
+        if let Some(kp) = keys_param(self.keys) {
+            params.push(kp);
+        }
+        if self.strip == Some(true) {
+            params.push("strip=true".to_string());
+        }
+        params
     }
 }
 
@@ -116,11 +140,13 @@ pub async fn get_object_by_handle(
     client: &GrampsClient,
     endpoint: &str,
     handle: &str,
-    keys: Option<&[String]>,
+    opts: ReadOptions<'_>,
 ) -> Result<serde_json::Value> {
-    let path = match keys_param(keys) {
-        Some(kp) => format!("/api/{endpoint}/{handle}?{kp}"),
-        None => format!("/api/{endpoint}/{handle}"),
+    let params = opts.query_params();
+    let path = if params.is_empty() {
+        format!("/api/{endpoint}/{handle}")
+    } else {
+        format!("/api/{endpoint}/{handle}?{}", params.join("&"))
     };
     client.get(&path).await
 }
@@ -132,10 +158,10 @@ pub async fn get_object_by_gramps_id(
     client: &GrampsClient,
     endpoint: &str,
     gramps_id: &str,
-    keys: Option<&[String]>,
+    opts: ReadOptions<'_>,
 ) -> Result<serde_json::Value> {
     let collection =
-        get_object_collection(client, endpoint, Some(gramps_id), None, None, None, keys).await?;
+        get_object_collection(client, endpoint, Some(gramps_id), None, None, None, opts).await?;
     let items = expect_array(endpoint, collection)?;
     resolve_gramps_id_match(endpoint, gramps_id, items)
 }
@@ -183,7 +209,7 @@ pub async fn get_object_collection(
     rules: Option<&serde_json::Value>,
     page: Option<u32>,
     pagesize: Option<u32>,
-    keys: Option<&[String]>,
+    opts: ReadOptions<'_>,
 ) -> Result<serde_json::Value> {
     let mut params: Vec<String> = Vec::new();
     if let Some(id) = gramps_id {
@@ -203,9 +229,7 @@ pub async fn get_object_collection(
     if let Some(ps) = pagesize {
         params.push(format!("pagesize={ps}"));
     }
-    if let Some(kp) = keys_param(keys) {
-        params.push(kp);
-    }
+    params.extend(opts.query_params());
     let path = if params.is_empty() {
         format!("/api/{endpoint}/")
     } else {
@@ -280,6 +304,48 @@ mod tests {
     fn keys_param_url_encodes_special_characters_per_element() {
         let keys = vec!["a b".to_string(), "c".to_string()];
         assert_eq!(keys_param(Some(&keys)), Some("keys=a%20b,c".to_string()));
+    }
+
+    #[test]
+    fn read_options_default_has_no_params() {
+        assert_eq!(ReadOptions::default().query_params(), Vec::<String>::new());
+    }
+
+    #[test]
+    fn read_options_strip_true_adds_strip_param() {
+        let opts = ReadOptions {
+            strip: Some(true),
+            ..Default::default()
+        };
+        assert_eq!(opts.query_params(), vec!["strip=true".to_string()]);
+    }
+
+    #[test]
+    fn read_options_strip_false_or_none_omits_strip_param() {
+        for strip in [Some(false), None] {
+            let opts = ReadOptions {
+                strip,
+                ..Default::default()
+            };
+            assert_eq!(
+                opts.query_params(),
+                Vec::<String>::new(),
+                "strip={strip:?} should not add a query parameter"
+            );
+        }
+    }
+
+    #[test]
+    fn read_options_combines_keys_and_strip() {
+        let keys = vec!["gramps_id".to_string()];
+        let opts = ReadOptions {
+            keys: Some(&keys),
+            strip: Some(true),
+        };
+        assert_eq!(
+            opts.query_params(),
+            vec!["keys=gramps_id".to_string(), "strip=true".to_string()]
+        );
     }
 
     #[test]

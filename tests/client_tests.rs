@@ -45,8 +45,13 @@ async fn auth_fails_with_wrong_password() {
 #[tokio::test]
 async fn get_nonexistent_returns_not_found() {
     let fixture = common::TestFixture::new().await;
-    let result =
-        get::get_object_by_handle(&fixture.client, "people", "NONEXISTENT_HANDLE", None).await;
+    let result = get::get_object_by_handle(
+        &fixture.client,
+        "people",
+        "NONEXISTENT_HANDLE",
+        get::ReadOptions::default(),
+    )
+    .await;
     assert!(
         matches!(result, Err(Error::NotFound(_))),
         "expected NotFound, got: {result:?}"

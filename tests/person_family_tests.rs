@@ -49,9 +49,14 @@ async fn create_and_get_person_round_trip() {
     .await
     .unwrap();
 
-    let person = get::get_object_by_handle(&fixture.client, "people", &handle, None)
-        .await
-        .unwrap();
+    let person = get::get_object_by_handle(
+        &fixture.client,
+        "people",
+        &handle,
+        get::ReadOptions::default(),
+    )
+    .await
+    .unwrap();
     assert_eq!(person["handle"].as_str(), Some(handle.as_str()));
     assert_eq!(person["primary_name"]["first_name"].as_str(), Some("Ivan"));
 }
@@ -80,7 +85,7 @@ async fn person_lifecycle() {
     .await
     .unwrap();
 
-    let person = get::get_object_by_handle(client, "people", &handle, None)
+    let person = get::get_object_by_handle(client, "people", &handle, get::ReadOptions::default())
         .await
         .unwrap();
     assert_eq!(person["primary_name"]["first_name"].as_str(), Some("Ivan"));
@@ -89,7 +94,7 @@ async fn person_lifecycle() {
     body["primary_name"]["first_name"] = serde_json::json!("Petr");
     update::update_person(client, &handle, &body).await.unwrap();
 
-    let updated = get::get_object_by_handle(client, "people", &handle, None)
+    let updated = get::get_object_by_handle(client, "people", &handle, get::ReadOptions::default())
         .await
         .unwrap();
     assert_eq!(updated["primary_name"]["first_name"].as_str(), Some("Petr"));
@@ -98,7 +103,7 @@ async fn person_lifecycle() {
         .await
         .unwrap();
     assert!(matches!(
-        get::get_object_by_handle(client, "people", &handle, None).await,
+        get::get_object_by_handle(client, "people", &handle, get::ReadOptions::default()).await,
         Err(Error::NotFound(_))
     ));
 }
@@ -139,9 +144,14 @@ async fn family_with_parents() {
     .await
     .unwrap();
 
-    let family = get::get_object_by_handle(client, "families", &family_handle, None)
-        .await
-        .unwrap();
+    let family = get::get_object_by_handle(
+        client,
+        "families",
+        &family_handle,
+        get::ReadOptions::default(),
+    )
+    .await
+    .unwrap();
     assert_eq!(family["father_handle"].as_str(), Some(father.as_str()));
     assert_eq!(family["mother_handle"].as_str(), Some(mother.as_str()));
 
@@ -159,9 +169,14 @@ async fn family_with_parents() {
     update::update_family(client, &family_handle, &body)
         .await
         .unwrap();
-    let updated = get::get_object_by_handle(client, "families", &family_handle, None)
-        .await
-        .unwrap();
+    let updated = get::get_object_by_handle(
+        client,
+        "families",
+        &family_handle,
+        get::ReadOptions::default(),
+    )
+    .await
+    .unwrap();
     assert_eq!(
         updated["mother_handle"].as_str(),
         Some(new_mother.as_str()),
@@ -191,9 +206,14 @@ async fn family_with_child() {
     .await
     .unwrap();
 
-    let family = get::get_object_by_handle(client, "families", &family_handle, None)
-        .await
-        .unwrap();
+    let family = get::get_object_by_handle(
+        client,
+        "families",
+        &family_handle,
+        get::ReadOptions::default(),
+    )
+    .await
+    .unwrap();
     let children = family["child_ref_list"].as_array().unwrap();
     assert_eq!(children.len(), 1);
     assert_eq!(children[0]["ref"].as_str(), Some(child.as_str()));
@@ -328,7 +348,7 @@ async fn partial_update_preserves_unspecified_person_fields() {
         .await
         .unwrap();
 
-    let updated = get::get_object_by_handle(client, "people", &handle, None)
+    let updated = get::get_object_by_handle(client, "people", &handle, get::ReadOptions::default())
         .await
         .unwrap();
     assert_eq!(updated["gender"].as_i64(), Some(2));
@@ -375,7 +395,7 @@ async fn partial_update_replaces_list_when_included_in_data() {
     .await
     .unwrap();
 
-    let updated = get::get_object_by_handle(client, "people", &handle, None)
+    let updated = get::get_object_by_handle(client, "people", &handle, get::ReadOptions::default())
         .await
         .unwrap();
     assert_eq!(
@@ -409,9 +429,10 @@ async fn update_rejects_mismatched_handle_in_data_without_writing() {
     .unwrap_err();
     assert!(matches!(err, Error::Validation(_)), "got: {err:?}");
 
-    let unchanged = get::get_object_by_handle(client, "people", &handle, None)
-        .await
-        .unwrap();
+    let unchanged =
+        get::get_object_by_handle(client, "people", &handle, get::ReadOptions::default())
+            .await
+            .unwrap();
     assert_eq!(
         unchanged["gender"].as_i64(),
         Some(1),
@@ -481,9 +502,14 @@ async fn partial_update_preserves_family_note_list() {
     .await
     .unwrap();
 
-    let updated = get::get_object_by_handle(client, "families", &family_handle, None)
-        .await
-        .unwrap();
+    let updated = get::get_object_by_handle(
+        client,
+        "families",
+        &family_handle,
+        get::ReadOptions::default(),
+    )
+    .await
+    .unwrap();
     assert_eq!(updated["father_handle"].as_str(), Some(new_father.as_str()));
     assert_eq!(
         updated["note_list"].as_array().unwrap(),

@@ -29,7 +29,7 @@ async fn query_filter_people_by_gramps_id() {
         .await
         .unwrap();
 
-    let obj = get::get_object_by_handle(client, "people", &handle, None)
+    let obj = get::get_object_by_handle(client, "people", &handle, get::ReadOptions::default())
         .await
         .unwrap();
     let gramps_id = obj["gramps_id"].as_str().expect("gramps_id missing");

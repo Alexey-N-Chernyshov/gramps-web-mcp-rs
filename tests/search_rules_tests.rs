@@ -165,18 +165,34 @@ async fn get_object_collection_pagination_and_gramps_id() {
         .unwrap();
 
     // plain collection browse returns an array
-    let all = get::get_object_collection(client, "people", None, None, None, None, None)
-        .await
-        .unwrap();
+    let all = get::get_object_collection(
+        client,
+        "people",
+        None,
+        None,
+        None,
+        None,
+        get::ReadOptions::default(),
+    )
+    .await
+    .unwrap();
     assert!(
         all.is_array(),
         "collection without params should be an array"
     );
 
     // pagination: page=1 pagesize=1 must return at most 1 item
-    let page1 = get::get_object_collection(client, "people", None, None, Some(1), Some(1), None)
-        .await
-        .unwrap();
+    let page1 = get::get_object_collection(
+        client,
+        "people",
+        None,
+        None,
+        Some(1),
+        Some(1),
+        get::ReadOptions::default(),
+    )
+    .await
+    .unwrap();
     assert!(page1.is_array());
     assert!(
         page1.as_array().unwrap().len() <= 1,
@@ -184,14 +200,21 @@ async fn get_object_collection_pagination_and_gramps_id() {
     );
 
     // gramps_id lookup: fetch the gramps_id of h1 then query by it
-    let obj = get::get_object_by_handle(client, "people", &h1, None)
+    let obj = get::get_object_by_handle(client, "people", &h1, get::ReadOptions::default())
         .await
         .unwrap();
     let gramps_id = obj["gramps_id"].as_str().expect("gramps_id missing");
-    let by_id =
-        get::get_object_collection(client, "people", Some(gramps_id), None, None, None, None)
-            .await
-            .unwrap();
+    let by_id = get::get_object_collection(
+        client,
+        "people",
+        Some(gramps_id),
+        None,
+        None,
+        None,
+        get::ReadOptions::default(),
+    )
+    .await
+    .unwrap();
     assert!(by_id.is_array());
     let items = by_id.as_array().unwrap();
     assert_eq!(
@@ -213,14 +236,15 @@ async fn get_object_by_gramps_id_returns_single_object_not_array() {
     let handle = create::create_person(client, CreatePersonRequest::default())
         .await
         .unwrap();
-    let obj = get::get_object_by_handle(client, "people", &handle, None)
+    let obj = get::get_object_by_handle(client, "people", &handle, get::ReadOptions::default())
         .await
         .unwrap();
     let gramps_id = obj["gramps_id"].as_str().expect("gramps_id missing");
 
-    let by_id = get::get_object_by_gramps_id(client, "people", gramps_id, None)
-        .await
-        .unwrap();
+    let by_id =
+        get::get_object_by_gramps_id(client, "people", gramps_id, get::ReadOptions::default())
+            .await
+            .unwrap();
     assert!(
         by_id.is_object(),
         "get_object_by_gramps_id should return a single object, not an array; got {by_id}"
@@ -237,9 +261,14 @@ async fn get_object_by_gramps_id_missing_returns_not_found() {
     let fixture = common::TestFixture::new().await;
     let client = &fixture.client;
 
-    let err = get::get_object_by_gramps_id(client, "people", "NONEXISTENT_GRAMPS_ID", None)
-        .await
-        .unwrap_err();
+    let err = get::get_object_by_gramps_id(
+        client,
+        "people",
+        "NONEXISTENT_GRAMPS_ID",
+        get::ReadOptions::default(),
+    )
+    .await
+    .unwrap_err();
     assert!(
         matches!(err, gramps_web_mcp_rs::client::Error::NotFound(_)),
         "got: {err:?}"
@@ -260,9 +289,17 @@ async fn get_object_by_handle_with_keys_returns_only_requested_fields() {
         .unwrap();
 
     let keys = vec!["gramps_id".to_string(), "primary_name".to_string()];
-    let obj = get::get_object_by_handle(client, "people", &handle, Some(&keys))
-        .await
-        .unwrap();
+    let obj = get::get_object_by_handle(
+        client,
+        "people",
+        &handle,
+        get::ReadOptions {
+            keys: Some(&keys),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
     let fields: Vec<&str> = obj
         .as_object()
         .unwrap()
@@ -292,15 +329,23 @@ async fn get_object_by_gramps_id_with_keys_returns_only_requested_fields() {
     let handle = create::create_person(client, CreatePersonRequest::default())
         .await
         .unwrap();
-    let full = get::get_object_by_handle(client, "people", &handle, None)
+    let full = get::get_object_by_handle(client, "people", &handle, get::ReadOptions::default())
         .await
         .unwrap();
     let gramps_id = full["gramps_id"].as_str().expect("gramps_id missing");
 
     let keys = vec!["handle".to_string()];
-    let obj = get::get_object_by_gramps_id(client, "people", gramps_id, Some(&keys))
-        .await
-        .unwrap();
+    let obj = get::get_object_by_gramps_id(
+        client,
+        "people",
+        gramps_id,
+        get::ReadOptions {
+            keys: Some(&keys),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
     let fields: Vec<&str> = obj
         .as_object()
         .unwrap()
@@ -329,7 +374,7 @@ async fn list_objects_with_rules_and_keys_restricts_every_item() {
     let handle = create::create_person(client, CreatePersonRequest::default())
         .await
         .unwrap();
-    let full = get::get_object_by_handle(client, "people", &handle, None)
+    let full = get::get_object_by_handle(client, "people", &handle, get::ReadOptions::default())
         .await
         .unwrap();
     let gramps_id = full["gramps_id"].as_str().expect("gramps_id missing");
@@ -343,7 +388,10 @@ async fn list_objects_with_rules_and_keys_restricts_every_item() {
         Some(&rules),
         None,
         None,
-        Some(&keys),
+        get::ReadOptions {
+            keys: Some(&keys),
+            ..Default::default()
+        },
     )
     .await
     .unwrap();
@@ -382,7 +430,7 @@ async fn list_objects_with_empty_keys_returns_full_objects() {
     let handle = create::create_person(client, CreatePersonRequest::default())
         .await
         .unwrap();
-    let full = get::get_object_by_handle(client, "people", &handle, None)
+    let full = get::get_object_by_handle(client, "people", &handle, get::ReadOptions::default())
         .await
         .unwrap();
     let gramps_id = full["gramps_id"].as_str().expect("gramps_id missing");
@@ -395,7 +443,10 @@ async fn list_objects_with_empty_keys_returns_full_objects() {
         None,
         None,
         None,
-        Some(&empty_keys),
+        get::ReadOptions {
+            keys: Some(&empty_keys),
+            ..Default::default()
+        },
     )
     .await
     .unwrap();
@@ -407,6 +458,116 @@ async fn list_objects_with_empty_keys_returns_full_objects() {
         "empty keys should return the full object, got {}",
         items[0]
     );
+
+    delete::delete_object(client, "people", &handle)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn get_object_by_handle_with_strip_omits_empty_fields() {
+    let fixture = common::TestFixture::new().await;
+    let client = &fixture.client;
+
+    // Default person: note_list is an empty list — exactly what `strip=true` should drop.
+    let handle = create::create_person(client, CreatePersonRequest::default())
+        .await
+        .unwrap();
+
+    let stripped = get::get_object_by_handle(
+        client,
+        "people",
+        &handle,
+        get::ReadOptions {
+            strip: Some(true),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert!(
+        stripped.get("note_list").is_none(),
+        "strip=true should omit the empty note_list field, got {stripped}"
+    );
+
+    let unstripped =
+        get::get_object_by_handle(client, "people", &handle, get::ReadOptions::default())
+            .await
+            .unwrap();
+    assert_eq!(
+        unstripped.get("note_list"),
+        Some(&serde_json::json!([])),
+        "sanity check: without strip, the empty note_list field is present as []"
+    );
+
+    delete::delete_object(client, "people", &handle)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn list_objects_with_rules_keys_and_strip_combined() {
+    let fixture = common::TestFixture::new().await;
+    let client = &fixture.client;
+
+    // primary_name/gramps_id are non-empty; note_list is left empty.
+    let handle = create::create_person(
+        client,
+        CreatePersonRequest {
+            primary_name: Some(PersonName {
+                first_name: Some("StripTest".to_string()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let full = get::get_object_by_handle(client, "people", &handle, get::ReadOptions::default())
+        .await
+        .unwrap();
+    let gramps_id = full["gramps_id"].as_str().expect("gramps_id missing");
+
+    let rules = matches_query_rule(&format!(r#"gramps_id == "{gramps_id}""#));
+    let keys = vec![
+        "gramps_id".to_string(),
+        "primary_name".to_string(),
+        "note_list".to_string(),
+    ];
+    let result = get::get_object_collection(
+        client,
+        "people",
+        None,
+        Some(&rules),
+        None,
+        None,
+        get::ReadOptions {
+            keys: Some(&keys),
+            strip: Some(true),
+        },
+    )
+    .await
+    .unwrap();
+
+    let items = result.as_array().expect("expected an array");
+    assert_eq!(items.len(), 1);
+    let item = &items[0];
+    let fields: Vec<&str> = item
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert!(
+        fields.iter().all(|f| keys.iter().any(|k| k == f)),
+        "every field should be one of the requested keys {keys:?}, got {fields:?}"
+    );
+    assert!(
+        item.get("note_list").is_none(),
+        "strip=true should drop the empty note_list even though it was requested via keys, got {item}"
+    );
+    assert!(item.get("gramps_id").is_some(), "got {item}");
+    assert!(item.get("primary_name").is_some(), "got {item}");
 
     delete::delete_object(client, "people", &handle)
         .await
@@ -488,15 +649,23 @@ async fn rules_filter_people_by_gramps_id() {
         .await
         .unwrap();
 
-    let obj = get::get_object_by_handle(client, "people", &handle, None)
+    let obj = get::get_object_by_handle(client, "people", &handle, get::ReadOptions::default())
         .await
         .unwrap();
     let gramps_id = obj["gramps_id"].as_str().expect("gramps_id missing");
 
     let rules = matches_query_rule(&format!(r#"gramps_id == "{gramps_id}""#));
-    let result = get::get_object_collection(client, "people", None, Some(&rules), None, None, None)
-        .await
-        .unwrap();
+    let result = get::get_object_collection(
+        client,
+        "people",
+        None,
+        Some(&rules),
+        None,
+        None,
+        get::ReadOptions::default(),
+    )
+    .await
+    .unwrap();
 
     assert!(result.is_array(), "rules filter should return an array");
     let items = result.as_array().unwrap();
@@ -508,10 +677,17 @@ async fn rules_filter_people_by_gramps_id() {
     );
 
     // rules and pagesize work together
-    let paged =
-        get::get_object_collection(client, "people", None, Some(&rules), Some(1), Some(1), None)
-            .await
-            .unwrap();
+    let paged = get::get_object_collection(
+        client,
+        "people",
+        None,
+        Some(&rules),
+        Some(1),
+        Some(1),
+        get::ReadOptions::default(),
+    )
+    .await
+    .unwrap();
     assert!(
         paged.is_array(),
         "rules + pagesize=1 should return an array"
@@ -556,10 +732,17 @@ async fn rules_filter_pagesize_without_page_still_caps_results() {
 
     // Gramps Web defaults `page` to 0 when omitted, which disables pagination and
     // silently ignores `pagesize` — pagesize alone, with no page, must still cap.
-    let paged =
-        get::get_object_collection(client, "people", None, Some(&rules), None, Some(2), None)
-            .await
-            .unwrap();
+    let paged = get::get_object_collection(
+        client,
+        "people",
+        None,
+        Some(&rules),
+        None,
+        Some(2),
+        get::ReadOptions::default(),
+    )
+    .await
+    .unwrap();
     assert!(
         paged.as_array().unwrap().len() <= 2,
         "pagesize=2 without page should still cap results, got {}",
@@ -602,10 +785,17 @@ async fn rules_filter_families_by_child_count() {
     .unwrap();
 
     let rules = matches_query_rule("count(children) > 0");
-    let result =
-        get::get_object_collection(client, "families", None, Some(&rules), None, None, None)
-            .await
-            .unwrap();
+    let result = get::get_object_collection(
+        client,
+        "families",
+        None,
+        Some(&rules),
+        None,
+        None,
+        get::ReadOptions::default(),
+    )
+    .await
+    .unwrap();
 
     assert!(result.is_array(), "rules filter should return an array");
     let items = result.as_array().unwrap();
