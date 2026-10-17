@@ -295,51 +295,28 @@ pub fn validate_handles(
     Ok(())
 }
 
-/// `sort` keys common to every object type (gramps-web-api 3.23.1, `api/resources/sort.py`).
-const COMMON_SORT_KEYS: &[&str] = &["gramps_id", "change", "private"];
-
-/// `sort` keys specific to each object type, on top of `COMMON_SORT_KEYS`. Endpoints not
-/// listed here (notes, citations, repositories) only support the common keys.
-fn type_specific_sort_keys(endpoint: &str) -> &'static [&'static str] {
-    match endpoint {
-        "people" => &["surname", "name", "soundex", "birth", "death", "gender"],
-        "families" => &["surname", "type", "soundex"],
-        "events" => &["date", "type", "description", "place"],
-        "places" => &["title", "type", "latitude", "longitude"],
-        "sources" => &["title", "author", "pubinfo", "abbrev"],
-        "media" => &["title", "path", "mime", "date"],
-        "tags" => &["name", "color", "priority"],
-        _ => &[],
+/// Appends a hint to a 422 Gramps Web error when the request included `sort` — `sort` keys
+/// aren't validated locally (that's gramps-web-api's own knowledge, not ours to duplicate), so
+/// an unknown key otherwise surfaces as a bare 422 with no indication that `sort` might be the
+/// cause. A no-op for any other status, or when `sort` is `None`/empty.
+pub fn hint_unknown_sort_key(err: Error, sort: Option<&[String]>) -> Error {
+    match err {
+        Error::Api { status: 422, body } if sort.is_some_and(|s| !s.is_empty()) => Error::Api {
+            status: 422,
+            body: format!(
+                "{body} (unknown sort key? valid keys depend on object_type, see the `sort` \
+                 parameter description)"
+            ),
+        },
+        other => other,
     }
-}
-
-/// Validates `list_objects`'s `sort` keys against the allowed set for `endpoint` before any
-/// API call — an unknown key otherwise gets a bare 422 from Gramps Web with no indication of
-/// what's actually valid, which an LLM can't self-correct from. A no-op when `sort` is
-/// `None` or empty.
-pub fn validate_sort(endpoint: &str, sort: Option<&[String]>) -> std::result::Result<(), String> {
-    let Some(sort) = sort.filter(|s| !s.is_empty()) else {
-        return Ok(());
-    };
-    let mut allowed = COMMON_SORT_KEYS.to_vec();
-    allowed.extend(type_specific_sort_keys(endpoint));
-    for key in sort {
-        let bare = key.strip_prefix('-').unwrap_or(key);
-        if !allowed.contains(&bare) {
-            return Err(format!(
-                "unknown sort key \"{key}\" for \"{endpoint}\" — allowed: {}",
-                allowed.join(", ")
-            ));
-        }
-    }
-    Ok(())
 }
 
 /// Structural parameters selecting *which* objects `list_objects` returns from a collection,
 /// and in what order — as opposed to `ReadOptions`, which only affects how much of each
 /// selected object comes back. `handles` is mutually exclusive with the rest in practice
 /// (Gramps Web silently ignores `rules`/`page`/`pagesize`/`sort` once `handles` is given);
-/// see `validate_handles`/`validate_sort`.
+/// see `validate_handles`.
 #[derive(Default)]
 pub struct CollectionQuery<'a> {
     pub gramps_id: Option<&'a str>,
@@ -489,61 +466,43 @@ mod tests {
     }
 
     #[test]
-    fn validate_sort_none_or_empty_is_always_ok() {
-        assert!(validate_sort("people", None).is_ok());
-        let empty: Vec<String> = vec![];
-        assert!(validate_sort("people", Some(&empty)).is_ok());
-    }
-
-    #[test]
-    fn validate_sort_accepts_common_keys_for_any_type() {
-        let sort = vec!["gramps_id".to_string(), "-change".to_string()];
-        assert!(validate_sort("notes", Some(&sort)).is_ok());
-    }
-
-    #[test]
-    fn validate_sort_accepts_type_specific_keys() {
-        let sort = vec!["birth".to_string()];
-        assert!(validate_sort("people", Some(&sort)).is_ok());
-        let sort = vec!["-birth".to_string()];
-        assert!(
-            validate_sort("people", Some(&sort)).is_ok(),
-            "descending prefix should strip before matching"
-        );
-    }
-
-    #[test]
-    fn validate_sort_rejects_key_from_a_different_type() {
-        // "birth" is person-specific, not valid for events.
-        let sort = vec!["birth".to_string()];
-        let err = validate_sort("events", Some(&sort)).unwrap_err();
-        assert!(err.contains("birth"), "got: {err}");
-        assert!(
-            err.contains("date"),
-            "should list events' allowed keys, got: {err}"
-        );
-    }
-
-    #[test]
-    fn validate_sort_rejects_unknown_key() {
+    fn hint_unknown_sort_key_appends_hint_on_422_with_sort() {
         let sort = vec!["not_a_real_key".to_string()];
-        let err = validate_sort("people", Some(&sort)).unwrap_err();
-        assert!(err.contains("not_a_real_key"), "got: {err}");
-        assert!(
-            err.contains("gramps_id"),
-            "should list allowed keys, got: {err}"
+        let err = hint_unknown_sort_key(
+            Error::Api {
+                status: 422,
+                body: "bad request".to_string(),
+            },
+            Some(&sort),
         );
+        let msg = err.to_string();
+        assert!(msg.contains("bad request"), "got: {msg}");
+        assert!(msg.contains("sort"), "got: {msg}");
     }
 
     #[test]
-    fn validate_sort_endpoint_without_specific_keys_still_allows_common_keys() {
-        let sort = vec!["private".to_string()];
-        assert!(validate_sort("citations", Some(&sort)).is_ok());
-        let sort = vec!["title".to_string()];
-        assert!(
-            validate_sort("citations", Some(&sort)).is_err(),
-            "\"title\" is not a valid sort key for citations"
+    fn hint_unknown_sort_key_leaves_422_without_sort_unchanged() {
+        let err = hint_unknown_sort_key(
+            Error::Api {
+                status: 422,
+                body: "bad request".to_string(),
+            },
+            None,
         );
+        assert_eq!(err.to_string(), "API error 422: bad request");
+    }
+
+    #[test]
+    fn hint_unknown_sort_key_leaves_other_statuses_unchanged() {
+        let sort = vec!["birth".to_string()];
+        let err = hint_unknown_sort_key(
+            Error::Api {
+                status: 404,
+                body: "not found".to_string(),
+            },
+            Some(&sort),
+        );
+        assert_eq!(err.to_string(), "API error 404: not found");
     }
 
     #[test]

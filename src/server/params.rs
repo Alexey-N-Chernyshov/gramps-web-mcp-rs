@@ -177,7 +177,11 @@ pub struct ListObjectsInput {
     /// Fetch these specific, already-known objects in one call, in the given order; unknown
     /// handles are skipped rather than erroring. Cannot be combined with `rules`/`page`/`pagesize`/`sort`.
     pub handles: Option<Vec<String>>,
-    /// Sort keys, "-" prefix for descending, e.g. ["birth"] or ["-change"]; keys depend on `object_type`.
+    /// Sort keys, "-" prefix for descending, e.g. ["-birth"]. All types: gramps_id, change,
+    /// private. person: surname, name, soundex, birth, death, gender; family: surname, type,
+    /// soundex; event: date, type, description, place; place: title, type, latitude,
+    /// longitude; source: title, author, pubinfo, abbrev; media: title, path, mime, date; tag:
+    /// name, color, priority (as of Gramps Web API 3.23).
     pub sort: Option<Vec<String>>,
 }
 
