@@ -41,10 +41,16 @@ fn cors_layer(allowed: Vec<String>) -> CorsLayer {
 }
 
 async fn spawn(app: Router) -> String {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("binding to an ephemeral local port should succeed");
+    let addr = listener
+        .local_addr()
+        .expect("bound listener should have a local address");
     tokio::spawn(async move {
-        axum::serve(listener, app).await.unwrap();
+        axum::serve(listener, app)
+            .await
+            .expect("test server should serve without error");
     });
     format!("http://{addr}")
 }
@@ -64,12 +70,18 @@ async fn oauth_app() -> Router {
         use base64::Engine as _;
         base64::engine::general_purpose::STANDARD.encode([7u8; 32])
     };
-    let store = oauth::Store::open(&store_path, &key).await.unwrap();
+    let store = oauth::Store::open(&store_path, &key)
+        .await
+        .expect("oauth store should open at a fresh temp path");
     let state = Arc::new(oauth::OAuthState {
         store,
-        api_url: "http://gramps.invalid".parse().unwrap(),
+        api_url: "http://gramps.invalid"
+            .parse()
+            .expect("test api url should be a valid URL"),
         http: reqwest::Client::new(),
-        issuer: "https://mcp.invalid".parse().unwrap(),
+        issuer: "https://mcp.invalid"
+            .parse()
+            .expect("test issuer should be a valid URL"),
         max_media_bytes: 50 * 1024 * 1024,
     });
 

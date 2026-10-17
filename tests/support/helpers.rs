@@ -56,7 +56,10 @@ impl TestFixture {
         let service = compose
             .service(SERVICE)
             .expect("grampsweb-test service should be running");
-        let port = service.get_host_port_ipv4(PORT).await.unwrap();
+        let port = service
+            .get_host_port_ipv4(PORT)
+            .await
+            .expect("grampsweb-test service should expose its port");
         let base_url = format!("http://localhost:{port}");
 
         register_admin(&base_url).await;

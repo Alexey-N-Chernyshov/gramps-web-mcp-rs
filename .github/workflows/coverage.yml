@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
@@ -21,6 +24,8 @@ jobs:
       matrix: ${{ steps.list.outputs.matrix }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - id: list
         run: |
           matrix=$(
@@ -38,13 +43,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
         with:
-          components: llvm-tools-preview
-      - uses: Swatinem/rust-cache@v2
+          persist-credentials: false
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal --component llvm-tools-preview
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: coverage
-      - uses: taiki-e/install-action@cargo-llvm-cov
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+        with:
+          tool: cargo-llvm-cov
 
       - name: Pre-build lib + all test binaries under coverage instrumentation
         run: |
@@ -62,13 +70,16 @@ jobs:
         include: ${{ fromJson(needs.discover-tests.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
         with:
-          components: llvm-tools-preview
-      - uses: Swatinem/rust-cache@v2
+          persist-credentials: false
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal --component llvm-tools-preview
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: coverage
-      - uses: taiki-e/install-action@cargo-llvm-cov
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+        with:
+          tool: cargo-llvm-cov
 
       - name: Run coverage (${{ matrix.name }})
         run: cargo llvm-cov ${{ matrix.args }} --lcov --output-path lcov.info
@@ -97,6 +108,8 @@ jobs:
           fi
 
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Download lcov artifacts
         uses: actions/download-artifact@v8
@@ -106,7 +119,7 @@ jobs:
           merge-multiple: false
 
       - name: Upload to Codecov
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           directory: coverage-reports
           token: ${{ secrets.CODECOV_TOKEN }}
