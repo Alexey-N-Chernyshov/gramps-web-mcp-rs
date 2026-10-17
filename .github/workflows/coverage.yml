@@ -43,6 +43,10 @@ jobs:
             args: --test client_tests
           - name: event_place_tests
             args: --test event_place_tests
+          - name: http_cors_tests
+            args: --test http_cors_tests
+          - name: http_origin_tests
+            args: --test http_origin_tests
           - name: media_binary_tests
             args: --test media_binary_tests
           - name: media_tests

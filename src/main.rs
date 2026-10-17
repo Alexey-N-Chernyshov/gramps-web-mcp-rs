@@ -16,6 +16,7 @@ mod app_error;
 mod auth;
 mod client;
 mod config;
+mod http_auth;
 mod models;
 mod oauth;
 mod server;
@@ -74,13 +75,17 @@ async fn run_http(config: config::Config) -> Result<(), AppError> {
     use rmcp::transport::streamable_http_server::{
         session::local::LocalSessionManager, StreamableHttpServerConfig, StreamableHttpService,
     };
-    use tower_http::cors::CorsLayer;
+    use tower_http::cors::{AllowOrigin, CorsLayer};
 
     let host = config.mcp_http_host.clone();
     let port = config.mcp_http_port;
     let bind_addr = format!("{host}:{port}");
     let auth_token = config.mcp_auth_token.clone();
     let allowed_hosts_raw = config.mcp_allowed_hosts.clone();
+    let allowed_origins = match config.mcp_allowed_origins.as_deref() {
+        Some(raw) => crate::config::parse_allowed_origins(raw)?,
+        None => Vec::new(),
+    };
     let oauth_enabled = config.mcp_oauth_enabled;
     let oauth_storage_path = config.mcp_oauth_storage_path.clone();
     let oauth_storage_key = config.mcp_oauth_storage_key.clone();
@@ -111,6 +116,17 @@ async fn run_http(config: config::Config) -> Result<(), AppError> {
             }
         }
         None => StreamableHttpServerConfig::default(),
+    };
+    let http_config = if allowed_origins.is_empty() {
+        tracing::info!(
+            "HTTP Origin validation enforced: requests carrying an Origin header are rejected \
+             (403) unless MCP_ALLOWED_ORIGINS lists it; requests with no Origin header still \
+             pass through"
+        );
+        http_config.enforce_origin_validation()
+    } else {
+        tracing::info!("HTTP allowed origins: {:?}", allowed_origins);
+        http_config.with_allowed_origins(allowed_origins.clone())
     }
     // Plain JSON responses instead of chunked SSE for simple request/response
     // calls — some reverse proxies (and flaky tunnels) mishandle chunked
@@ -123,11 +139,6 @@ async fn run_http(config: config::Config) -> Result<(), AppError> {
 
     let service =
         StreamableHttpService::new(move || Ok(mcp_server.clone()), session_manager, http_config);
-
-    let cors = CorsLayer::new()
-        .allow_methods([Method::GET, Method::POST, Method::DELETE])
-        .allow_headers(tower_http::cors::Any)
-        .allow_origin(tower_http::cors::Any);
 
     let mcp_router = if oauth_enabled {
         tracing::info!("OAuth mode enabled — per-user Gramps identity on every request");
@@ -162,7 +173,7 @@ async fn run_http(config: config::Config) -> Result<(), AppError> {
                     .nest_service("/mcp", service)
                     .route_layer(axum::middleware::from_fn_with_state(
                         token,
-                        bearer_auth_middleware,
+                        http_auth::bearer_auth_middleware,
                     ))
             }
             None => {
@@ -172,10 +183,28 @@ async fn run_http(config: config::Config) -> Result<(), AppError> {
         }
     };
 
-    let app = mcp_router
-        .route("/health", axum::routing::get(|| async { "ok" }))
-        .layer(cors)
-        .layer(tower_http::trace::TraceLayer::new_for_http());
+    let cors = if allowed_origins.is_empty() {
+        None
+    } else {
+        let origins = allowed_origins.clone();
+        Some(
+            CorsLayer::new()
+                .allow_methods([Method::GET, Method::POST, Method::DELETE])
+                .allow_headers(tower_http::cors::Any)
+                .allow_origin(AllowOrigin::predicate(move |origin, _parts| {
+                    origin
+                        .to_str()
+                        .is_ok_and(|o| crate::config::origin_matches(o, &origins))
+                })),
+        )
+    };
+
+    let app = mcp_router.route("/health", axum::routing::get(|| async { "ok" }));
+    let app = match cors {
+        Some(cors) => app.layer(cors),
+        None => app,
+    };
+    let app = app.layer(tower_http::trace::TraceLayer::new_for_http());
 
     let listener = tokio::net::TcpListener::bind(&bind_addr).await?;
 
@@ -184,27 +213,4 @@ async fn run_http(config: config::Config) -> Result<(), AppError> {
     axum::serve(listener, app).await?;
 
     Ok(())
-}
-
-async fn bearer_auth_middleware(
-    axum::extract::State(token): axum::extract::State<secrecy::SecretString>,
-    req: axum::extract::Request,
-    next: axum::middleware::Next,
-) -> axum::response::Response {
-    use axum::http::StatusCode;
-    use axum::response::IntoResponse;
-
-    let expected = format!("Bearer {}", token.expose_secret());
-    let authorized = req
-        .headers()
-        .get(axum::http::header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .map(|v| v == expected)
-        .unwrap_or(false);
-
-    if authorized {
-        next.run(req).await
-    } else {
-        (StatusCode::UNAUTHORIZED, "Unauthorized").into_response()
-    }
 }
