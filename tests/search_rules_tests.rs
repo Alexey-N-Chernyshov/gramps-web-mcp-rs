@@ -16,11 +16,12 @@
 mod common;
 
 use gramps_web_mcp_rs::{
+    client::GrampsClient,
     models::{
         event::CreateEventRequest, family::CreateFamilyRequest, person::CreatePersonRequest,
-        person::PersonName, place::CreatePlaceRequest, source::CreateSourceRequest,
+        person::PersonName, place::CreatePlaceRequest, source::CreateSourceRequest, Handle,
     },
-    tools::{create, delete, get, search},
+    tools::{create, delete, get, search, update},
 };
 
 #[tokio::test]
@@ -174,6 +175,7 @@ async fn get_object_collection_pagination_and_gramps_id() {
             page: None,
             pagesize: None,
             handles: None,
+            sort: None,
         },
         get::ReadOptions::default(),
     )
@@ -194,6 +196,7 @@ async fn get_object_collection_pagination_and_gramps_id() {
             page: Some(1),
             pagesize: Some(1),
             handles: None,
+            sort: None,
         },
         get::ReadOptions::default(),
     )
@@ -219,6 +222,7 @@ async fn get_object_collection_pagination_and_gramps_id() {
             page: None,
             pagesize: None,
             handles: None,
+            sort: None,
         },
         get::ReadOptions::default(),
     )
@@ -399,6 +403,7 @@ async fn list_objects_with_rules_and_keys_restricts_every_item() {
             page: None,
             pagesize: None,
             handles: None,
+            sort: None,
         },
         get::ReadOptions {
             keys: Some(&keys),
@@ -461,6 +466,7 @@ async fn list_objects_with_empty_keys_returns_full_objects() {
             page: None,
             pagesize: None,
             handles: None,
+            sort: None,
         },
         get::ReadOptions {
             keys: Some(&empty_keys),
@@ -610,6 +616,7 @@ async fn list_objects_with_rules_keys_and_strip_combined() {
             page: None,
             pagesize: None,
             handles: None,
+            sort: None,
         },
         get::ReadOptions {
             keys: Some(&keys),
@@ -788,6 +795,7 @@ async fn list_objects_with_rules_and_profile() {
             page: None,
             pagesize: None,
             handles: None,
+            sort: None,
         },
         get::ReadOptions {
             profile: Some(&profile_sections),
@@ -946,6 +954,163 @@ async fn list_objects_with_handles_and_keys_restricts_every_item() {
     delete::delete_object(client, "people", &h2).await.unwrap();
 }
 
+/// Creates a person with a birth event dated `year` so `sort=["birth"]`/`["-birth"]` has
+/// something real to compare.
+async fn create_person_born_in(client: &GrampsClient, year: i32) -> (Handle, Handle) {
+    use gramps_web_mcp_rs::models::GrampsDate;
+
+    let event_handle = create::create_event(
+        client,
+        CreateEventRequest {
+            event_type: Some(serde_json::json!("Birth")),
+            date: Some(GrampsDate {
+                dateval: Some(serde_json::json!([1, 1, year, false])),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    let person_handle = create::create_person(
+        client,
+        CreatePersonRequest {
+            event_ref_list: Some(vec![
+                serde_json::json!({"ref": event_handle, "role": "Primary"}),
+            ]),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    // Adding to event_ref_list alone doesn't register it as *the* birth event — Gramps
+    // Web's `sort=birth` reads `birth_ref_index` (an index into event_ref_list), which
+    // stays -1 until set explicitly; it's the only event here, so that's index 0.
+    update::update_person(
+        client,
+        &person_handle,
+        &serde_json::json!({"birth_ref_index": 0}),
+    )
+    .await
+    .unwrap();
+
+    (person_handle, event_handle)
+}
+
+#[tokio::test]
+async fn list_objects_sort_by_birth_ascending_and_descending() {
+    let fixture = common::TestFixture::new().await;
+    let client = &fixture.client;
+
+    let (older, older_event) = create_person_born_in(client, 1950).await;
+    let (younger, younger_event) = create_person_born_in(client, 1980).await;
+
+    let ascending = get::get_object_collection(
+        client,
+        "people",
+        get::CollectionQuery {
+            sort: Some(&["birth".to_string()]),
+            ..Default::default()
+        },
+        get::ReadOptions::default(),
+    )
+    .await
+    .unwrap();
+    let ascending_handles: Vec<&str> = ascending
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|p| p["handle"].as_str())
+        .filter(|h| *h == older || *h == younger)
+        .collect();
+    assert_eq!(
+        ascending_handles,
+        vec![older.as_str(), younger.as_str()],
+        "sort=[\"birth\"] should order oldest first"
+    );
+
+    let descending = get::get_object_collection(
+        client,
+        "people",
+        get::CollectionQuery {
+            sort: Some(&["-birth".to_string()]),
+            ..Default::default()
+        },
+        get::ReadOptions::default(),
+    )
+    .await
+    .unwrap();
+    let descending_handles: Vec<&str> = descending
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|p| p["handle"].as_str())
+        .filter(|h| *h == older || *h == younger)
+        .collect();
+    assert_eq!(
+        descending_handles,
+        vec![younger.as_str(), older.as_str()],
+        "sort=[\"-birth\"] should reverse the order"
+    );
+
+    delete::delete_object(client, "people", &older)
+        .await
+        .unwrap();
+    delete::delete_object(client, "people", &younger)
+        .await
+        .unwrap();
+    delete::delete_object(client, "events", &older_event)
+        .await
+        .unwrap();
+    delete::delete_object(client, "events", &younger_event)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn list_objects_sort_rules_and_pagesize_together() {
+    let fixture = common::TestFixture::new().await;
+    let client = &fixture.client;
+
+    let (p1, e1) = create_person_born_in(client, 1900).await;
+    let (p2, e2) = create_person_born_in(client, 1910).await;
+
+    let rules = matches_query_rule("exists(events)");
+    let result = get::get_object_collection(
+        client,
+        "people",
+        get::CollectionQuery {
+            rules: Some(&rules),
+            pagesize: Some(50),
+            sort: Some(&["birth".to_string()]),
+            ..Default::default()
+        },
+        get::ReadOptions::default(),
+    )
+    .await
+    .unwrap();
+
+    let handles: Vec<&str> = result
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|p| p["handle"].as_str())
+        .filter(|h| *h == p1 || *h == p2)
+        .collect();
+    assert_eq!(
+        handles,
+        vec![p1.as_str(), p2.as_str()],
+        "sort should still apply alongside rules + pagesize"
+    );
+
+    delete::delete_object(client, "people", &p1).await.unwrap();
+    delete::delete_object(client, "people", &p2).await.unwrap();
+    delete::delete_object(client, "events", &e1).await.unwrap();
+    delete::delete_object(client, "events", &e2).await.unwrap();
+}
+
 #[tokio::test]
 async fn search_pagination() {
     let fixture = common::TestFixture::new().await;
@@ -1036,6 +1201,7 @@ async fn rules_filter_people_by_gramps_id() {
             page: None,
             pagesize: None,
             handles: None,
+            sort: None,
         },
         get::ReadOptions::default(),
     )
@@ -1061,6 +1227,7 @@ async fn rules_filter_people_by_gramps_id() {
             page: Some(1),
             pagesize: Some(1),
             handles: None,
+            sort: None,
         },
         get::ReadOptions::default(),
     )
@@ -1119,6 +1286,7 @@ async fn rules_filter_pagesize_without_page_still_caps_results() {
             page: None,
             pagesize: Some(2),
             handles: None,
+            sort: None,
         },
         get::ReadOptions::default(),
     )
@@ -1175,6 +1343,7 @@ async fn rules_filter_families_by_child_count() {
             page: None,
             pagesize: None,
             handles: None,
+            sort: None,
         },
         get::ReadOptions::default(),
     )

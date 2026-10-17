@@ -177,6 +177,8 @@ pub struct ListObjectsInput {
     /// Fetch these specific, already-known objects in one call, in the given order; unknown
     /// handles are skipped rather than erroring. Cannot be combined with `rules`/`page`/`pagesize`.
     pub handles: Option<Vec<String>>,
+    /// Sort keys, "-" prefix for descending, e.g. ["birth"] or ["-change"]; keys depend on `object_type`.
+    pub sort: Option<Vec<String>>,
 }
 
 #[derive(Deserialize, JsonSchema, Debug)]

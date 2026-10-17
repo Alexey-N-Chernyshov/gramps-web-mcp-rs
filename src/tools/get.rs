@@ -255,8 +255,9 @@ fn resolve_gramps_id_match(
 pub const MAX_HANDLES: usize = 100;
 
 /// Validates `list_objects`'s `handles` argument before any API call:
-/// - Gramps Web ignores `rules`/`page`/`pagesize` entirely once `handles` is given (it's
-///   handled before filtering/pagination) — rejected here instead of silently dropped.
+/// - Gramps Web ignores `rules`/`page`/`pagesize`/`sort` entirely once `handles` is given
+///   (it's handled before filtering/sorting/pagination) — rejected here instead of silently
+///   dropped.
 /// - more than `MAX_HANDLES` handles is rejected rather than silently truncated or sent as
 ///   an oversized request that risks a proxy error.
 ///
@@ -266,16 +267,21 @@ pub fn validate_handles(
     rules: Option<&serde_json::Value>,
     page: Option<u32>,
     pagesize: Option<u32>,
+    sort: Option<&[String]>,
 ) -> std::result::Result<(), String> {
     let Some(handles) = handles.filter(|h| !h.is_empty()) else {
         return Ok(());
     };
-    if rules.is_some() || page.is_some() || pagesize.is_some() {
+    if rules.is_some()
+        || page.is_some()
+        || pagesize.is_some()
+        || sort.is_some_and(|s| !s.is_empty())
+    {
         return Err(
-            "`handles` cannot be combined with `rules`/`page`/`pagesize` — Gramps Web \
-             ignores them once `handles` is given (handles are resolved before filtering \
-             or pagination), so combining would silently drop your filter/pagination \
-             instead of erroring. Make separate calls."
+            "`handles` cannot be combined with `rules`/`page`/`pagesize`/`sort` — Gramps Web \
+             ignores them once `handles` is given (handles are resolved before filtering, \
+             sorting, or pagination), so combining would silently drop them instead of \
+             erroring. Make separate calls."
                 .to_string(),
         );
     }
@@ -289,10 +295,51 @@ pub fn validate_handles(
     Ok(())
 }
 
-/// Structural parameters selecting *which* objects `list_objects` returns from a
-/// collection — as opposed to `ReadOptions`, which only affects how much of each selected
-/// object comes back. `handles` is mutually exclusive with the rest in practice (Gramps Web
-/// silently ignores `rules`/`page`/`pagesize` once `handles` is given); see `validate_handles`.
+/// `sort` keys common to every object type (gramps-web-api 3.23.1, `api/resources/sort.py`).
+const COMMON_SORT_KEYS: &[&str] = &["gramps_id", "change", "private"];
+
+/// `sort` keys specific to each object type, on top of `COMMON_SORT_KEYS`. Endpoints not
+/// listed here (notes, citations, repositories) only support the common keys.
+fn type_specific_sort_keys(endpoint: &str) -> &'static [&'static str] {
+    match endpoint {
+        "people" => &["surname", "name", "soundex", "birth", "death", "gender"],
+        "families" => &["surname", "type", "soundex"],
+        "events" => &["date", "type", "description", "place"],
+        "places" => &["title", "type", "latitude", "longitude"],
+        "sources" => &["title", "author", "pubinfo", "abbrev"],
+        "media" => &["title", "path", "mime", "date"],
+        "tags" => &["name", "color", "priority"],
+        _ => &[],
+    }
+}
+
+/// Validates `list_objects`'s `sort` keys against the allowed set for `endpoint` before any
+/// API call — an unknown key otherwise gets a bare 422 from Gramps Web with no indication of
+/// what's actually valid, which an LLM can't self-correct from. A no-op when `sort` is
+/// `None` or empty.
+pub fn validate_sort(endpoint: &str, sort: Option<&[String]>) -> std::result::Result<(), String> {
+    let Some(sort) = sort.filter(|s| !s.is_empty()) else {
+        return Ok(());
+    };
+    let mut allowed = COMMON_SORT_KEYS.to_vec();
+    allowed.extend(type_specific_sort_keys(endpoint));
+    for key in sort {
+        let bare = key.strip_prefix('-').unwrap_or(key);
+        if !allowed.contains(&bare) {
+            return Err(format!(
+                "unknown sort key \"{key}\" for \"{endpoint}\" — allowed: {}",
+                allowed.join(", ")
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Structural parameters selecting *which* objects `list_objects` returns from a collection,
+/// and in what order — as opposed to `ReadOptions`, which only affects how much of each
+/// selected object comes back. `handles` is mutually exclusive with the rest in practice
+/// (Gramps Web silently ignores `rules`/`page`/`pagesize`/`sort` once `handles` is given);
+/// see `validate_handles`/`validate_sort`.
 #[derive(Default)]
 pub struct CollectionQuery<'a> {
     pub gramps_id: Option<&'a str>,
@@ -300,6 +347,7 @@ pub struct CollectionQuery<'a> {
     pub page: Option<u32>,
     pub pagesize: Option<u32>,
     pub handles: Option<&'a [String]>,
+    pub sort: Option<&'a [String]>,
 }
 
 pub async fn get_object_collection(
@@ -328,6 +376,9 @@ pub async fn get_object_collection(
     }
     if let Some(hp) = csv_param("handles", query.handles) {
         params.push(hp);
+    }
+    if let Some(sp) = csv_param("sort", query.sort) {
+        params.push(sp);
     }
     params.extend(opts.query_params());
     let path = if params.is_empty() {
@@ -383,45 +434,116 @@ mod tests {
 
     #[test]
     fn validate_handles_none_or_empty_is_always_ok() {
-        assert!(validate_handles(None, None, None, None).is_ok());
+        assert!(validate_handles(None, None, None, None, None).is_ok());
         let empty: Vec<String> = vec![];
-        assert!(
-            validate_handles(Some(&empty), Some(&serde_json::json!({})), Some(1), Some(1)).is_ok()
-        );
+        assert!(validate_handles(
+            Some(&empty),
+            Some(&serde_json::json!({})),
+            Some(1),
+            Some(1),
+            Some(&empty)
+        )
+        .is_ok());
     }
 
     #[test]
     fn validate_handles_alone_is_ok() {
         let handles = vec!["H1".to_string(), "H2".to_string()];
-        assert!(validate_handles(Some(&handles), None, None, None).is_ok());
+        assert!(validate_handles(Some(&handles), None, None, None, None).is_ok());
     }
 
     #[test]
     fn validate_handles_rejects_rules() {
         let handles = vec!["H1".to_string()];
         let rules = serde_json::json!({"rules": []});
-        let err = validate_handles(Some(&handles), Some(&rules), None, None).unwrap_err();
+        let err = validate_handles(Some(&handles), Some(&rules), None, None, None).unwrap_err();
         assert!(err.contains("rules"), "got: {err}");
     }
 
     #[test]
     fn validate_handles_rejects_page_or_pagesize() {
         let handles = vec!["H1".to_string()];
-        assert!(validate_handles(Some(&handles), None, Some(1), None).is_err());
-        assert!(validate_handles(Some(&handles), None, None, Some(20)).is_err());
+        assert!(validate_handles(Some(&handles), None, Some(1), None, None).is_err());
+        assert!(validate_handles(Some(&handles), None, None, Some(20), None).is_err());
+    }
+
+    #[test]
+    fn validate_handles_rejects_sort() {
+        let handles = vec!["H1".to_string()];
+        let sort = vec!["birth".to_string()];
+        let err = validate_handles(Some(&handles), None, None, None, Some(&sort)).unwrap_err();
+        assert!(err.contains("sort"), "got: {err}");
     }
 
     #[test]
     fn validate_handles_rejects_more_than_max() {
         let handles: Vec<String> = (0..=MAX_HANDLES).map(|i| format!("H{i}")).collect();
-        let err = validate_handles(Some(&handles), None, None, None).unwrap_err();
+        let err = validate_handles(Some(&handles), None, None, None, None).unwrap_err();
         assert!(err.contains(&MAX_HANDLES.to_string()), "got: {err}");
     }
 
     #[test]
     fn validate_handles_accepts_exactly_max() {
         let handles: Vec<String> = (0..MAX_HANDLES).map(|i| format!("H{i}")).collect();
-        assert!(validate_handles(Some(&handles), None, None, None).is_ok());
+        assert!(validate_handles(Some(&handles), None, None, None, None).is_ok());
+    }
+
+    #[test]
+    fn validate_sort_none_or_empty_is_always_ok() {
+        assert!(validate_sort("people", None).is_ok());
+        let empty: Vec<String> = vec![];
+        assert!(validate_sort("people", Some(&empty)).is_ok());
+    }
+
+    #[test]
+    fn validate_sort_accepts_common_keys_for_any_type() {
+        let sort = vec!["gramps_id".to_string(), "-change".to_string()];
+        assert!(validate_sort("notes", Some(&sort)).is_ok());
+    }
+
+    #[test]
+    fn validate_sort_accepts_type_specific_keys() {
+        let sort = vec!["birth".to_string()];
+        assert!(validate_sort("people", Some(&sort)).is_ok());
+        let sort = vec!["-birth".to_string()];
+        assert!(
+            validate_sort("people", Some(&sort)).is_ok(),
+            "descending prefix should strip before matching"
+        );
+    }
+
+    #[test]
+    fn validate_sort_rejects_key_from_a_different_type() {
+        // "birth" is person-specific, not valid for events.
+        let sort = vec!["birth".to_string()];
+        let err = validate_sort("events", Some(&sort)).unwrap_err();
+        assert!(err.contains("birth"), "got: {err}");
+        assert!(
+            err.contains("date"),
+            "should list events' allowed keys, got: {err}"
+        );
+    }
+
+    #[test]
+    fn validate_sort_rejects_unknown_key() {
+        let sort = vec!["not_a_real_key".to_string()];
+        let err = validate_sort("people", Some(&sort)).unwrap_err();
+        assert!(err.contains("not_a_real_key"), "got: {err}");
+        assert!(
+            err.contains("gramps_id"),
+            "should list allowed keys, got: {err}"
+        );
+    }
+
+    #[test]
+    fn validate_sort_endpoint_without_specific_keys_still_allows_common_keys() {
+        let sort = vec!["private".to_string()];
+        assert!(validate_sort("citations", Some(&sort)).is_ok());
+        let sort = vec!["title".to_string()];
+        assert!(
+            validate_sort("citations", Some(&sort)).is_err(),
+            "\"title\" is not a valid sort key for citations"
+        );
     }
 
     #[test]
