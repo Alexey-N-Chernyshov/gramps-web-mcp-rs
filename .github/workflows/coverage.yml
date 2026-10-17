@@ -10,6 +10,29 @@ env:
   RUSTFLAGS: -D warnings
 
 jobs:
+  # Builds the coverage-matrix leg list from whatever's actually in
+  # `tests/*.rs` right now, plus the fixed `unit` leg (`--lib --bins`), so
+  # a new integration test file is picked up automatically instead of
+  # needing a matching matrix entry added by hand.
+  discover-tests:
+    name: Discover integration test files
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.list.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: list
+        run: |
+          matrix=$(
+            for f in tests/*.rs; do basename "$f" .rs; done \
+              | jq -R -s -c '
+                  split("\n") | map(select(length > 0)) |
+                  map({name: ., args: ("--test " + .)})
+                ' \
+              | jq -c '[{name: "unit", args: "--lib --bins"}] + .'
+          )
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
   coverage-warmup:
     name: Warm coverage build cache
     runs-on: ubuntu-latest
@@ -31,40 +54,12 @@ jobs:
 
   coverage-matrix:
     name: Coverage (${{ matrix.name }})
-    needs: coverage-warmup
+    needs: [coverage-warmup, discover-tests]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - name: unit
-            args: --lib --bins
-          - name: client_tests
-            args: --test client_tests
-          - name: event_place_tests
-            args: --test event_place_tests
-          - name: http_cors_tests
-            args: --test http_cors_tests
-          - name: http_origin_tests
-            args: --test http_origin_tests
-          - name: media_binary_tests
-            args: --test media_binary_tests
-          - name: media_tests
-            args: --test media_tests
-          - name: merge_tests
-            args: --test merge_tests
-          - name: oauth_tests
-            args: --test oauth_tests
-          - name: oauth_prefix_tests
-            args: --test oauth_prefix_tests
-          - name: person_family_tests
-            args: --test person_family_tests
-          - name: query_tests
-            args: --test query_tests
-          - name: reference_tests
-            args: --test reference_tests
-          - name: search_rules_tests
-            args: --test search_rules_tests
+        include: ${{ fromJson(needs.discover-tests.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
