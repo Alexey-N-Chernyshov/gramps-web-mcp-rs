@@ -49,7 +49,7 @@ async fn create_and_get_person_round_trip() {
     .await
     .unwrap();
 
-    let person = get::get_object_by_handle(&fixture.client, "people", &handle)
+    let person = get::get_object_by_handle(&fixture.client, "people", &handle, None)
         .await
         .unwrap();
     assert_eq!(person["handle"].as_str(), Some(handle.as_str()));
@@ -80,7 +80,7 @@ async fn person_lifecycle() {
     .await
     .unwrap();
 
-    let person = get::get_object_by_handle(client, "people", &handle)
+    let person = get::get_object_by_handle(client, "people", &handle, None)
         .await
         .unwrap();
     assert_eq!(person["primary_name"]["first_name"].as_str(), Some("Ivan"));
@@ -89,7 +89,7 @@ async fn person_lifecycle() {
     body["primary_name"]["first_name"] = serde_json::json!("Petr");
     update::update_person(client, &handle, &body).await.unwrap();
 
-    let updated = get::get_object_by_handle(client, "people", &handle)
+    let updated = get::get_object_by_handle(client, "people", &handle, None)
         .await
         .unwrap();
     assert_eq!(updated["primary_name"]["first_name"].as_str(), Some("Petr"));
@@ -98,7 +98,7 @@ async fn person_lifecycle() {
         .await
         .unwrap();
     assert!(matches!(
-        get::get_object_by_handle(client, "people", &handle).await,
+        get::get_object_by_handle(client, "people", &handle, None).await,
         Err(Error::NotFound(_))
     ));
 }
@@ -139,7 +139,7 @@ async fn family_with_parents() {
     .await
     .unwrap();
 
-    let family = get::get_object_by_handle(client, "families", &family_handle)
+    let family = get::get_object_by_handle(client, "families", &family_handle, None)
         .await
         .unwrap();
     assert_eq!(family["father_handle"].as_str(), Some(father.as_str()));
@@ -159,7 +159,7 @@ async fn family_with_parents() {
     update::update_family(client, &family_handle, &body)
         .await
         .unwrap();
-    let updated = get::get_object_by_handle(client, "families", &family_handle)
+    let updated = get::get_object_by_handle(client, "families", &family_handle, None)
         .await
         .unwrap();
     assert_eq!(
@@ -191,7 +191,7 @@ async fn family_with_child() {
     .await
     .unwrap();
 
-    let family = get::get_object_by_handle(client, "families", &family_handle)
+    let family = get::get_object_by_handle(client, "families", &family_handle, None)
         .await
         .unwrap();
     let children = family["child_ref_list"].as_array().unwrap();
@@ -328,7 +328,7 @@ async fn partial_update_preserves_unspecified_person_fields() {
         .await
         .unwrap();
 
-    let updated = get::get_object_by_handle(client, "people", &handle)
+    let updated = get::get_object_by_handle(client, "people", &handle, None)
         .await
         .unwrap();
     assert_eq!(updated["gender"].as_i64(), Some(2));
@@ -375,7 +375,7 @@ async fn partial_update_replaces_list_when_included_in_data() {
     .await
     .unwrap();
 
-    let updated = get::get_object_by_handle(client, "people", &handle)
+    let updated = get::get_object_by_handle(client, "people", &handle, None)
         .await
         .unwrap();
     assert_eq!(
@@ -409,7 +409,7 @@ async fn update_rejects_mismatched_handle_in_data_without_writing() {
     .unwrap_err();
     assert!(matches!(err, Error::Validation(_)), "got: {err:?}");
 
-    let unchanged = get::get_object_by_handle(client, "people", &handle)
+    let unchanged = get::get_object_by_handle(client, "people", &handle, None)
         .await
         .unwrap();
     assert_eq!(
@@ -481,7 +481,7 @@ async fn partial_update_preserves_family_note_list() {
     .await
     .unwrap();
 
-    let updated = get::get_object_by_handle(client, "families", &family_handle)
+    let updated = get::get_object_by_handle(client, "families", &family_handle, None)
         .await
         .unwrap();
     assert_eq!(updated["father_handle"].as_str(), Some(new_father.as_str()));

@@ -14,8 +14,10 @@ native Gramps filter rules (relationship, ancestor/descendant, tag-based,
 filtering/sorting with column selection. Call `get_goql_reference` or
 `get_rules_reference` before writing a `where_expr`/`rules` filter, not
 after a failed one. Use `query_object`'s `select` and `limit` to avoid
-pulling full objects you don't need. Once you have a `handle` or
-`gramps_id`, read the full record with `get_object`.
+pulling full objects you don't need; for `list_objects`, pass `keys` the
+same way to cut large rule-filtered results down to the fields you need.
+Once you have a `handle` or `gramps_id`, read the full record with
+`get_object`.
 
 `update_*` tools do a shallow merge: pass in `data` only the fields you
 want to change, and every other field already on the record is preserved.

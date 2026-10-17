@@ -39,7 +39,7 @@ async fn source_round_trip() {
     .await
     .unwrap();
 
-    let source = get::get_object_by_handle(client, "sources", &handle)
+    let source = get::get_object_by_handle(client, "sources", &handle, None)
         .await
         .unwrap();
     assert_eq!(source["title"].as_str(), Some("Vital Records 1850"));
@@ -48,7 +48,7 @@ async fn source_round_trip() {
     let mut body = source.clone();
     body["title"] = serde_json::json!("Vital Records 1900");
     update::update_source(client, &handle, &body).await.unwrap();
-    let updated = get::get_object_by_handle(client, "sources", &handle)
+    let updated = get::get_object_by_handle(client, "sources", &handle, None)
         .await
         .unwrap();
     assert_eq!(updated["title"].as_str(), Some("Vital Records 1900"));
@@ -57,7 +57,7 @@ async fn source_round_trip() {
         .await
         .unwrap();
     assert!(matches!(
-        get::get_object_by_handle(client, "sources", &handle).await,
+        get::get_object_by_handle(client, "sources", &handle, None).await,
         Err(Error::NotFound(_))
     ));
 }
@@ -81,7 +81,7 @@ async fn citation_links_source() {
         .await
         .unwrap();
 
-    let citation = get::get_object_by_handle(client, "citations", &citation_handle)
+    let citation = get::get_object_by_handle(client, "citations", &citation_handle, None)
         .await
         .unwrap();
     assert_eq!(
@@ -95,7 +95,7 @@ async fn citation_links_source() {
     update::update_citation(client, &citation_handle, &body)
         .await
         .unwrap();
-    let updated = get::get_object_by_handle(client, "citations", &citation_handle)
+    let updated = get::get_object_by_handle(client, "citations", &citation_handle, None)
         .await
         .unwrap();
     assert_eq!(updated["page"].as_str(), Some("p. 99"));
@@ -117,7 +117,7 @@ async fn note_round_trip() {
         .await
         .unwrap();
 
-    let note = get::get_object_by_handle(client, "notes", &handle)
+    let note = get::get_object_by_handle(client, "notes", &handle, None)
         .await
         .unwrap();
     assert_eq!(note["text"]["string"].as_str(), Some("Hello from test"));
@@ -125,7 +125,7 @@ async fn note_round_trip() {
     let mut body = note.clone();
     body["text"]["string"] = serde_json::json!("Updated note text");
     update::update_note(client, &handle, &body).await.unwrap();
-    let updated = get::get_object_by_handle(client, "notes", &handle)
+    let updated = get::get_object_by_handle(client, "notes", &handle, None)
         .await
         .unwrap();
     assert_eq!(
@@ -137,7 +137,7 @@ async fn note_round_trip() {
         .await
         .unwrap();
     assert!(matches!(
-        get::get_object_by_handle(client, "notes", &handle).await,
+        get::get_object_by_handle(client, "notes", &handle, None).await,
         Err(Error::NotFound(_))
     ));
 }
@@ -151,7 +151,7 @@ async fn tag_round_trip() {
         .await
         .unwrap();
 
-    let tag = get::get_object_by_handle(client, "tags", &handle)
+    let tag = get::get_object_by_handle(client, "tags", &handle, None)
         .await
         .unwrap();
     assert_eq!(tag["name"].as_str(), Some("Important"));
@@ -160,7 +160,7 @@ async fn tag_round_trip() {
     let mut body = tag.clone();
     body["color"] = serde_json::json!("#00FF00");
     update::update_tag(client, &handle, &body).await.unwrap();
-    let updated = get::get_object_by_handle(client, "tags", &handle)
+    let updated = get::get_object_by_handle(client, "tags", &handle, None)
         .await
         .unwrap();
     assert_eq!(updated["color"].as_str(), Some("#00FF00"));
@@ -169,7 +169,7 @@ async fn tag_round_trip() {
         .await
         .unwrap();
     assert!(matches!(
-        get::get_object_by_handle(client, "tags", &handle).await,
+        get::get_object_by_handle(client, "tags", &handle, None).await,
         Err(Error::NotFound(_))
     ));
 }
@@ -183,7 +183,7 @@ async fn repository_round_trip() {
         .await
         .unwrap();
 
-    let repo = get::get_object_by_handle(client, "repositories", &handle)
+    let repo = get::get_object_by_handle(client, "repositories", &handle, None)
         .await
         .unwrap();
     assert_eq!(repo["name"].as_str(), Some("National Archives"));
@@ -194,7 +194,7 @@ async fn repository_round_trip() {
     update::update_repository(client, &handle, &body)
         .await
         .unwrap();
-    let updated = get::get_object_by_handle(client, "repositories", &handle)
+    let updated = get::get_object_by_handle(client, "repositories", &handle, None)
         .await
         .unwrap();
     assert_eq!(updated["name"].as_str(), Some("State Archives"));
@@ -203,7 +203,7 @@ async fn repository_round_trip() {
         .await
         .unwrap();
     assert!(matches!(
-        get::get_object_by_handle(client, "repositories", &handle).await,
+        get::get_object_by_handle(client, "repositories", &handle, None).await,
         Err(Error::NotFound(_))
     ));
 }

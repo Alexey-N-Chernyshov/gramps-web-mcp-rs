@@ -89,19 +89,40 @@ pub async fn get_object(
     client: &GrampsClient,
     endpoint: &str,
     lookup: ObjectLookup,
+    keys: Option<&[String]>,
 ) -> Result<serde_json::Value> {
     match lookup {
-        ObjectLookup::Handle(h) => get_object_by_handle(client, endpoint, &h).await,
-        ObjectLookup::GrampsId(id) => get_object_by_gramps_id(client, endpoint, &id).await,
+        ObjectLookup::Handle(h) => get_object_by_handle(client, endpoint, &h, keys).await,
+        ObjectLookup::GrampsId(id) => get_object_by_gramps_id(client, endpoint, &id, keys).await,
     }
+}
+
+/// Builds a `keys=a,b,c` query parameter (each element URL-encoded individually, joined with
+/// a literal comma) — the Gramps Web convention for restricting a response to a set of
+/// top-level fields. `None` for no `keys` argument, or an empty list (nothing left to ask
+/// for), so the caller omits the parameter entirely rather than sending `keys=`.
+fn keys_param(keys: Option<&[String]>) -> Option<String> {
+    let keys = keys.filter(|k| !k.is_empty())?;
+    Some(format!(
+        "keys={}",
+        keys.iter()
+            .map(|k| urlencoding::encode(k))
+            .collect::<Vec<_>>()
+            .join(",")
+    ))
 }
 
 pub async fn get_object_by_handle(
     client: &GrampsClient,
     endpoint: &str,
     handle: &str,
+    keys: Option<&[String]>,
 ) -> Result<serde_json::Value> {
-    client.get(&format!("/api/{endpoint}/{handle}")).await
+    let path = match keys_param(keys) {
+        Some(kp) => format!("/api/{endpoint}/{handle}?{kp}"),
+        None => format!("/api/{endpoint}/{handle}"),
+    };
+    client.get(&path).await
 }
 
 /// Resolves a Gramps ID to a single object by filtering the collection endpoint. Gramps Web
@@ -111,9 +132,10 @@ pub async fn get_object_by_gramps_id(
     client: &GrampsClient,
     endpoint: &str,
     gramps_id: &str,
+    keys: Option<&[String]>,
 ) -> Result<serde_json::Value> {
     let collection =
-        get_object_collection(client, endpoint, Some(gramps_id), None, None, None).await?;
+        get_object_collection(client, endpoint, Some(gramps_id), None, None, None, keys).await?;
     let items = expect_array(endpoint, collection)?;
     resolve_gramps_id_match(endpoint, gramps_id, items)
 }
@@ -161,6 +183,7 @@ pub async fn get_object_collection(
     rules: Option<&serde_json::Value>,
     page: Option<u32>,
     pagesize: Option<u32>,
+    keys: Option<&[String]>,
 ) -> Result<serde_json::Value> {
     let mut params: Vec<String> = Vec::new();
     if let Some(id) = gramps_id {
@@ -179,6 +202,9 @@ pub async fn get_object_collection(
     }
     if let Some(ps) = pagesize {
         params.push(format!("pagesize={ps}"));
+    }
+    if let Some(kp) = keys_param(keys) {
+        params.push(kp);
     }
     let path = if params.is_empty() {
         format!("/api/{endpoint}/")
@@ -229,6 +255,31 @@ mod tests {
     fn resolve_object_lookup_allows_handle_for_tags() {
         let lookup = resolve_object_lookup("tags", Some("T1".to_string()), None).unwrap();
         assert!(matches!(lookup, ObjectLookup::Handle(h) if h == "T1"));
+    }
+
+    #[test]
+    fn keys_param_none_omits_the_parameter() {
+        assert_eq!(keys_param(None), None);
+    }
+
+    #[test]
+    fn keys_param_empty_slice_omits_the_parameter() {
+        assert_eq!(keys_param(Some(&[])), None);
+    }
+
+    #[test]
+    fn keys_param_joins_and_encodes_each_element() {
+        let keys = vec!["gramps_id".to_string(), "primary_name".to_string()];
+        assert_eq!(
+            keys_param(Some(&keys)),
+            Some("keys=gramps_id,primary_name".to_string())
+        );
+    }
+
+    #[test]
+    fn keys_param_url_encodes_special_characters_per_element() {
+        let keys = vec!["a b".to_string(), "c".to_string()];
+        assert_eq!(keys_param(Some(&keys)), Some("keys=a%20b,c".to_string()));
     }
 
     #[test]

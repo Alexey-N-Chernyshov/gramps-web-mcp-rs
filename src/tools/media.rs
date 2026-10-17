@@ -153,7 +153,7 @@ async fn apply_media_metadata(
     description: Option<&str>,
     is_private: Option<bool>,
 ) -> Result<()> {
-    let mut body = get::get_object_by_handle(client, "media", handle).await?;
+    let mut body = get::get_object_by_handle(client, "media", handle, None).await?;
     body["mime"] = serde_json::json!(mime);
     if let Some(desc) = description {
         body["desc"] = serde_json::json!(desc);
@@ -186,7 +186,7 @@ pub async fn get_media_file(
     max_bytes: Option<u64>,
     allow_private: bool,
 ) -> Result<MediaFile> {
-    let metadata = get::get_object_by_handle(client, "media", handle).await?;
+    let metadata = get::get_object_by_handle(client, "media", handle, None).await?;
 
     let is_private = metadata["private"].as_bool().unwrap_or(false);
     if is_private && !allow_private {
@@ -281,7 +281,7 @@ pub async fn replace_media_file(
         }
     }
 
-    let metadata = get::get_object_by_handle(client, "media", handle)
+    let metadata = get::get_object_by_handle(client, "media", handle, None)
         .await
         .map_err(wrap)?;
     let old_checksum = metadata["checksum"].as_str();

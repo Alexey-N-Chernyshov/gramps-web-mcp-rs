@@ -243,6 +243,7 @@ or `query_object` instead.")]
             object_type,
             handle,
             gramps_id,
+            keys,
         }): Parameters<GetObjectInput>,
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
@@ -258,7 +259,7 @@ or `query_object` instead.")]
             Ok(lookup) => lookup,
             Err(msg) => return Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
         };
-        get::get_object(&client, endpoint, lookup)
+        get::get_object(&client, endpoint, lookup, keys.as_deref())
             .await
             .map_or_else(api_err, ok_json)
     }
@@ -277,6 +278,7 @@ Use `page`/`pagesize` to paginate (default page=1, pagesize=20).")]
             rules,
             page,
             pagesize,
+            keys,
         }): Parameters<ListObjectsInput>,
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
@@ -294,6 +296,7 @@ Use `page`/`pagesize` to paginate (default page=1, pagesize=20).")]
             rules.as_ref(),
             page,
             pagesize,
+            keys.as_deref(),
         )
         .await
         .map_or_else(api_err, ok_json)
