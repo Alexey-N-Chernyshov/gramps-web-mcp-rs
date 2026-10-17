@@ -317,9 +317,6 @@ Use `page`/`pagesize` to paginate (default page=1, pagesize=20).")]
         ) {
             return Ok(CallToolResult::error(vec![ContentBlock::text(msg)]));
         }
-        if let Err(msg) = get::validate_sort(endpoint, sort.as_deref()) {
-            return Ok(CallToolResult::error(vec![ContentBlock::text(msg)]));
-        }
         let profile = profile_strings(profile);
         let opts = get::ReadOptions {
             keys: keys.as_deref(),
@@ -336,6 +333,7 @@ Use `page`/`pagesize` to paginate (default page=1, pagesize=20).")]
         };
         get::get_object_collection(&client, endpoint, query, opts)
             .await
+            .map_err(|e| get::hint_unknown_sort_key(e, sort.as_deref()))
             .map_or_else(api_err, ok_json)
     }
 

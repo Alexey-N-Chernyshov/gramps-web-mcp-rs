@@ -1112,6 +1112,34 @@ async fn list_objects_sort_rules_and_pagesize_together() {
 }
 
 #[tokio::test]
+async fn list_objects_unknown_sort_key_reaches_gramps_web_and_gets_a_hint() {
+    let fixture = common::TestFixture::new().await;
+    let client = &fixture.client;
+
+    // No local validation of `sort` keys anymore — the connector sends it through as-is and
+    // lets Gramps Web itself reject what it doesn't recognize.
+    let sort = vec!["not_a_real_sort_key".to_string()];
+    let err = get::get_object_collection(
+        client,
+        "people",
+        get::CollectionQuery {
+            sort: Some(&sort),
+            ..Default::default()
+        },
+        get::ReadOptions::default(),
+    )
+    .await
+    .expect_err("Gramps Web should reject an unknown sort key itself");
+
+    let hinted = get::hint_unknown_sort_key(err, Some(&sort));
+    let msg = hinted.to_string();
+    assert!(
+        msg.contains("sort"),
+        "error should hint that `sort` might be the cause, got: {msg}"
+    );
+}
+
+#[tokio::test]
 async fn search_pagination() {
     let fixture = common::TestFixture::new().await;
     let client = &fixture.client;
