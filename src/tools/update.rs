@@ -50,16 +50,18 @@ fn fetch_path(endpoint: &str, handle: &str) -> String {
     format!("/api/{endpoint}/{handle}")
 }
 
-/// Apply a JSON Merge Patch (RFC 7396) of `patch` onto `target`, in place.
-///
-/// Recurses only when both sides are objects; otherwise `patch`'s value replaces `target`'s
-/// wholesale (so a list is always replaced whole, never merged element-by-element). A `null`
-/// in `patch` removes the corresponding key from `target`.
+/// JSON Merge Patch (RFC 7396 §2 `MergePatch`): non-object `patch` replaces `target`
+/// wholesale; object `patch` coerces `target` to an object and merges keys in recursively,
+/// with `null` deleting rather than being copied in.
 fn merge_patch(target: &mut serde_json::Value, patch: &serde_json::Value) {
-    let (Some(patch_obj), Some(target_obj)) = (patch.as_object(), target.as_object_mut()) else {
+    let Some(patch_obj) = patch.as_object() else {
         *target = patch.clone();
         return;
     };
+    if target.as_object().is_none() {
+        *target = serde_json::Value::Object(serde_json::Map::new());
+    }
+    let target_obj = target.as_object_mut().expect("just coerced to an object");
     for (key, value) in patch_obj {
         if value.is_null() {
             target_obj.remove(key);
@@ -283,6 +285,46 @@ mod tests {
                 }
             })
         );
+    }
+
+    /// All 15 examples from RFC 7396 Appendix A.
+    #[test]
+    fn merge_patch_rfc7396_appendix_a_examples() {
+        use serde_json::json;
+        let cases = [
+            (json!({"a":"b"}), json!({"a":"c"}), json!({"a":"c"})),
+            (json!({"a":"b"}), json!({"b":"c"}), json!({"a":"b","b":"c"})),
+            (json!({"a":"b"}), json!({"a":null}), json!({})),
+            (
+                json!({"a":"b","b":"c"}),
+                json!({"a":null}),
+                json!({"b":"c"}),
+            ),
+            (json!({"a":["b"]}), json!({"a":"c"}), json!({"a":"c"})),
+            (json!({"a":"c"}), json!({"a":["b"]}), json!({"a":["b"]})),
+            (
+                json!({"a":{"b":"c"}}),
+                json!({"a":{"b":"d","c":null}}),
+                json!({"a":{"b":"d"}}),
+            ),
+            (json!({"a":[{"b":"c"}]}), json!({"a":[1]}), json!({"a":[1]})),
+            (json!(["a", "b"]), json!(["c", "d"]), json!(["c", "d"])),
+            (json!({"a":"b"}), json!(["c"]), json!(["c"])),
+            (json!({"a":"foo"}), json!(null), json!(null)),
+            (json!({"a":"foo"}), json!("bar"), json!("bar")),
+            (json!({"e":null}), json!({"a":1}), json!({"e":null,"a":1})),
+            (json!([1, 2]), json!({"a":"b","c":null}), json!({"a":"b"})),
+            (
+                json!({}),
+                json!({"a":{"bb":{"ccc":null}}}),
+                json!({"a":{"bb":{}}}),
+            ),
+        ];
+        for (original, patch, expected) in cases {
+            let mut target = original.clone();
+            merge_patch(&mut target, &patch);
+            assert_eq!(target, expected, "original {original}, patch {patch}");
+        }
     }
 
     #[test]
