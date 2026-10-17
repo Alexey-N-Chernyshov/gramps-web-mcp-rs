@@ -251,7 +251,7 @@ pub struct CreateEventInput {
     /// year-only, [7, 11, 1867] for 7 November 1867. Preferred over date_text — enables sorting
     /// and filtering.
     pub date: Option<[i32; 3]>,
-    /// Free-text date for approximate or unparseable dates, e.g. "circa 1850". Ignored if date
+    /// Free-text date for approximate or unparsable dates, e.g. "circa 1850". Ignored if date
     /// is provided.
     pub date_text: Option<String>,
     pub place_handle: Option<String>,
