@@ -13,10 +13,14 @@
 // limitations under the License.
 
 //! In-process MCP-level test harness: runs `GrampsMcpServer` and a bare rmcp client
-//! connected over a `tokio::io::duplex` pipe — no HTTP, no Docker. Exercises exactly what a
-//! real MCP client sees: tool names, JSON-RPC argument parsing, and `server.rs`'s own early
-//! validation and error mapping, none of which the `tools/*`-level integration tests (which
-//! call straight into `tools::*` functions) touch.
+//! connected over a `tokio::io::duplex` pipe — no HTTP. Exercises exactly what a real MCP
+//! client sees: tool names, JSON-RPC argument parsing, and `server.rs`'s own validation and
+//! error mapping, none of which calling straight into `tools::*` functions touches.
+//!
+//! [`test_config`]/[`McpHarness::new`] point at an unreachable URL, for `mcp_server_tests.rs`'s
+//! no-Docker tests of `server.rs`'s own logic. [`McpHarness::connect`] points at a real
+//! backend — a `TestFixture`'s tree-scoped user — for the `tests/*_tests.rs` integration
+//! suite, which exercises the same tools end to end against real Gramps Web.
 
 use gramps_web_mcp_rs::{
     config::{Config, TransportMode},
@@ -33,16 +37,24 @@ use rmcp::{
 /// or (worse) silently "succeeding" against a server that was never meant to be reached —
 /// which is the whole point of these tests: every scenario here must be rejected by
 /// `server.rs` itself, before any Gramps Web request is attempted.
+#[allow(dead_code)]
 pub const UNREACHABLE_API_URL: &str = "http://127.0.0.1:9";
 
 /// A `Config` that builds a valid `GrampsMcpServer` without touching the network:
 /// `GRAMPS_API_URL` points at [`UNREACHABLE_API_URL`], and construction itself never makes a
 /// request. `readonly` is the only field callers typically need to override.
+#[allow(dead_code)]
 pub fn test_config(readonly: bool) -> Config {
+    test_config_for(UNREACHABLE_API_URL, readonly)
+}
+
+/// Like [`test_config`], but against an arbitrary `base_url` instead of the fixed unreachable
+/// one — the common defaults every `Config` in this harness starts from. `gramps_username`/
+/// `gramps_password` are placeholders here; [`McpHarness::connect`] overrides them with a
+/// real `TestFixture` user.
+fn test_config_for(base_url: &str, readonly: bool) -> Config {
     Config {
-        gramps_api_url: UNREACHABLE_API_URL
-            .parse()
-            .expect("UNREACHABLE_API_URL should be a valid URL"),
+        gramps_api_url: base_url.parse().expect("base_url should be a valid URL"),
         gramps_username: Some("svc".to_string()),
         gramps_password: Some("pw".to_string().into()),
         gramps_readonly: readonly,
@@ -68,6 +80,19 @@ pub struct McpHarness {
 }
 
 impl McpHarness {
+    /// Connects to a real backend (a `TestFixture`'s tree-scoped user, or any other reachable
+    /// Gramps Web instance) — for the `tests/*_tests.rs` integration suite, as opposed to
+    /// [`test_config`]'s unreachable URL used by `mcp_server_tests.rs`'s no-Gramps-Web tests.
+    #[allow(dead_code)]
+    pub async fn connect(base_url: &str, username: &str, password: &str) -> Self {
+        Self::new(Config {
+            gramps_username: Some(username.to_string()),
+            gramps_password: Some(password.to_string().into()),
+            ..test_config_for(base_url, false)
+        })
+        .await
+    }
+
     pub async fn new(config: Config) -> Self {
         let (server_transport, client_transport) = tokio::io::duplex(64 * 1024);
 
@@ -102,6 +127,7 @@ impl McpHarness {
             .await
     }
 
+    #[allow(dead_code)]
     pub async fn list_tools(&self) -> Vec<Tool> {
         self.client
             .list_all_tools()
@@ -111,29 +137,90 @@ impl McpHarness {
 }
 
 /// Asserts `result` succeeded both at the protocol level and as a tool result, and returns
-/// its JSON body (every tool in this server replies with one `ContentBlock::text` holding
-/// pretty-printed JSON — see `ok_json` in `src/server.rs`). Every tool that returns JSON also
-/// reaches Gramps Web, so this is unused by the no-Gramps-Web tests in this PR — kept here for
-/// the Docker-backed MCP-level tests (part 2) that call real tools end to end.
+/// the raw text of its first content block. Most tools reply with one JSON-bearing block
+/// (use [`expect_ok`] for those); `create_*` and `delete_object`/`merge_*` reply with a plain
+/// sentence instead ("Created person with handle: ...", "Deleted person ...", "Merged person
+/// ... into ...") — this is the one to use for those.
 #[allow(dead_code)]
-pub fn expect_ok(result: Result<CallToolResult, ServiceError>) -> serde_json::Value {
+pub fn expect_success(result: Result<CallToolResult, ServiceError>) -> String {
     let result = result.expect("call_tool should succeed at the protocol level");
     assert_ne!(
         result.is_error,
         Some(true),
         "expected a successful tool result, got an error result: {result:?}"
     );
-    let text = result
+    result
+        .content
+        .first()
+        .and_then(|c| c.as_text())
+        .map(|t| t.text.clone())
+        .expect("expected a text content block")
+}
+
+/// Asserts `result` succeeded both at the protocol level and as a tool result, and returns
+/// its JSON body (most tools reply with one `ContentBlock::text` holding JSON — see `ok_json`
+/// in `src/server.rs`). For `create_*`/`delete_object`/`merge_*`'s plain-sentence replies, use
+/// [`expect_success`] instead.
+#[allow(dead_code)]
+pub fn expect_ok(result: Result<CallToolResult, ServiceError>) -> serde_json::Value {
+    let text = expect_success(result);
+    serde_json::from_str(&text).expect("tool result text should be valid JSON")
+}
+
+/// For any `create_*` tool: asserts success and extracts the handle from its
+/// "Created ... with handle: <handle>" reply.
+#[allow(dead_code)]
+pub fn expect_created_handle(result: Result<CallToolResult, ServiceError>) -> String {
+    let text = expect_success(result);
+    text.rsplit("handle: ")
+        .next()
+        .expect("expected '...handle: <handle>' in the response text")
+        .trim()
+        .to_string()
+}
+
+/// For `get_media_file`: asserts success and returns (the JSON summary block, the decoded
+/// bytes of the embedded resource block).
+#[allow(dead_code)]
+pub fn expect_media_file(
+    result: Result<CallToolResult, ServiceError>,
+) -> (serde_json::Value, Vec<u8>) {
+    let result = result.expect("call_tool should succeed at the protocol level");
+    assert_ne!(
+        result.is_error,
+        Some(true),
+        "expected a successful tool result, got an error result: {result:?}"
+    );
+    let summary_text = result
         .content
         .first()
         .and_then(|c| c.as_text())
         .map(|t| t.text.as_str())
-        .expect("expected a text content block");
-    serde_json::from_str(text).expect("tool result text should be valid JSON")
+        .expect("expected a text summary block");
+    let summary: serde_json::Value =
+        serde_json::from_str(summary_text).expect("summary should be valid JSON");
+
+    let resource = result
+        .content
+        .get(1)
+        .and_then(|c| c.as_resource())
+        .expect("expected an embedded resource block");
+    let bytes = match &resource.resource {
+        rmcp::model::ResourceContents::BlobResourceContents { blob, .. } => {
+            use base64::Engine as _;
+            base64::engine::general_purpose::STANDARD
+                .decode(blob)
+                .expect("blob should be valid base64")
+        }
+        other => panic!("expected a blob resource, got: {other:?}"),
+    };
+
+    (summary, bytes)
 }
 
 /// Asserts `result` reached the tool (no protocol-level error) but the tool itself reported
 /// a `CallToolResult::error`, and returns the concatenated text of its content blocks.
+#[allow(dead_code)]
 pub fn expect_error_text(result: Result<CallToolResult, ServiceError>) -> String {
     let result = result.expect("call_tool should succeed at the protocol level");
     assert_eq!(

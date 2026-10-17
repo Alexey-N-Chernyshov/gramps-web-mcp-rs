@@ -14,39 +14,41 @@
 
 #[path = "support/helpers.rs"]
 mod common;
+#[path = "support/mcp.rs"]
+mod mcp;
 
-use gramps_web_mcp_rs::{
-    models::person::{CreatePersonRequest, PersonName},
-    tools::{create, delete, get, query},
-};
+use common::TestFixture;
+use mcp::{expect_created_handle, expect_ok, McpHarness};
+use serde_json::json;
 
 #[tokio::test]
 async fn query_filter_people_by_gramps_id() {
-    let fixture = common::TestFixture::new().await;
-    let client = &fixture.client;
+    let fixture = TestFixture::new().await;
+    let harness =
+        McpHarness::connect(&fixture.base_url, &fixture.username, common::TEST_PASS).await;
 
-    let handle = create::create_person(client, CreatePersonRequest::default())
-        .await
-        .unwrap();
-
-    let obj = get::get_object_by_handle(client, "people", &handle, get::ReadOptions::default())
-        .await
-        .unwrap();
+    let handle = expect_created_handle(harness.call("create_person", json!({})).await);
+    let obj = expect_ok(
+        harness
+            .call(
+                "get_object",
+                json!({"object_type": "person", "handle": handle}),
+            )
+            .await,
+    );
     let gramps_id = obj["gramps_id"].as_str().expect("gramps_id missing");
 
-    let where_expr = format!(r#"gramps_id == "{gramps_id}""#);
-    let result = query::query_object(
-        client,
-        "people",
-        None,
-        Some(where_expr),
-        None,
-        None,
-        None,
-        None,
-    )
-    .await
-    .unwrap();
+    let result = expect_ok(
+        harness
+            .call(
+                "query_object",
+                json!({
+                    "object_type": "person",
+                    "where_expr": format!(r#"gramps_id == "{gramps_id}""#),
+                }),
+            )
+            .await,
+    );
 
     let items = result["items"]
         .as_array()
@@ -57,77 +59,55 @@ async fn query_filter_people_by_gramps_id() {
             .any(|p| p["handle"].as_str() == Some(handle.as_str())),
         "where_expr filter should find the created person"
     );
-
-    delete::delete_object(client, "people", &handle)
-        .await
-        .unwrap();
 }
 
 #[tokio::test]
 async fn query_limit_caps_results() {
-    let fixture = common::TestFixture::new().await;
-    let client = &fixture.client;
+    let fixture = TestFixture::new().await;
+    let harness =
+        McpHarness::connect(&fixture.base_url, &fixture.username, common::TEST_PASS).await;
 
-    let h1 = create::create_person(
-        client,
-        CreatePersonRequest {
-            primary_name: Some(PersonName {
-                first_name: Some("QueryLimitOne".to_string()),
-                ..Default::default()
-            }),
-            ..Default::default()
-        },
-    )
-    .await
-    .unwrap();
-    let h2 = create::create_person(
-        client,
-        CreatePersonRequest {
-            primary_name: Some(PersonName {
-                first_name: Some("QueryLimitTwo".to_string()),
-                ..Default::default()
-            }),
-            ..Default::default()
-        },
-    )
-    .await
-    .unwrap();
-
-    let result = query::query_object(client, "people", None, None, None, Some(1), None, None)
+    harness
+        .call("create_person", json!({"first_name": "QueryLimitOne"}))
         .await
-        .unwrap();
+        .expect("call_tool should succeed at the protocol level");
+    harness
+        .call("create_person", json!({"first_name": "QueryLimitTwo"}))
+        .await
+        .expect("call_tool should succeed at the protocol level");
+
+    let result = expect_ok(
+        harness
+            .call("query_object", json!({"object_type": "person", "limit": 1}))
+            .await,
+    );
 
     let items = result["items"]
         .as_array()
         .expect("query_object response should have an `items` array");
     assert!(items.len() <= 1, "limit=1 should cap results to at most 1");
-
-    delete::delete_object(client, "people", &h1).await.unwrap();
-    delete::delete_object(client, "people", &h2).await.unwrap();
 }
 
 #[tokio::test]
 async fn query_select_narrows_columns() {
-    let fixture = common::TestFixture::new().await;
-    let client = &fixture.client;
+    let fixture = TestFixture::new().await;
+    let harness =
+        McpHarness::connect(&fixture.base_url, &fixture.username, common::TEST_PASS).await;
 
-    let handle = create::create_person(client, CreatePersonRequest::default())
-        .await
-        .unwrap();
+    let handle = expect_created_handle(harness.call("create_person", json!({})).await);
 
-    let where_expr = format!(r#"handle == "{handle}""#);
-    let result = query::query_object(
-        client,
-        "people",
-        Some(vec!["handle".to_string(), "gramps_id".to_string()]),
-        Some(where_expr),
-        None,
-        None,
-        None,
-        None,
-    )
-    .await
-    .unwrap();
+    let result = expect_ok(
+        harness
+            .call(
+                "query_object",
+                json!({
+                    "object_type": "person",
+                    "select": ["handle", "gramps_id"],
+                    "where_expr": format!(r#"handle == "{handle}""#),
+                }),
+            )
+            .await,
+    );
 
     let items = result["items"]
         .as_array()
@@ -138,42 +118,47 @@ async fn query_select_narrows_columns() {
         "select+where_expr should find exactly one person"
     );
     assert_eq!(items[0]["handle"].as_str(), Some(handle.as_str()));
-
-    delete::delete_object(client, "people", &handle)
-        .await
-        .unwrap();
 }
 
 #[tokio::test]
 async fn query_count_returns_total_count() {
-    let fixture = common::TestFixture::new().await;
-    let client = &fixture.client;
+    let fixture = TestFixture::new().await;
+    let harness =
+        McpHarness::connect(&fixture.base_url, &fixture.username, common::TEST_PASS).await;
 
-    let handle = create::create_person(client, CreatePersonRequest::default())
-        .await
-        .unwrap();
+    let handle = expect_created_handle(harness.call("create_person", json!({})).await);
 
-    let where_expr = format!(r#"handle == "{handle}""#);
-    let result = query::query_object(
-        client,
-        "people",
-        None,
-        Some(where_expr),
-        None,
-        None,
-        None,
-        Some(true),
-    )
-    .await
-    .unwrap();
+    let result = expect_ok(
+        harness
+            .call(
+                "query_object",
+                json!({
+                    "object_type": "person",
+                    "where_expr": format!(r#"handle == "{handle}""#),
+                    "count": true,
+                }),
+            )
+            .await,
+    );
 
     assert_eq!(
         result["total_count"].as_u64(),
         Some(1),
         "count=true should report exactly one matching row"
     );
+}
 
-    delete::delete_object(client, "people", &handle)
-        .await
-        .unwrap();
+#[tokio::test]
+async fn get_tree_info_reports_object_counts() {
+    let fixture = TestFixture::new().await;
+    let harness =
+        McpHarness::connect(&fixture.base_url, &fixture.username, common::TEST_PASS).await;
+
+    expect_created_handle(harness.call("create_person", json!({})).await);
+
+    let info = expect_ok(harness.call("get_tree_info", json!({})).await);
+    assert!(
+        info["object_counts"]["people"].as_u64().unwrap_or(0) >= 1,
+        "expected at least the one created person counted, got {info}"
+    );
 }

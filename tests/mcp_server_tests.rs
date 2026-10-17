@@ -376,3 +376,197 @@ async fn get_goql_reference_succeeds_without_touching_gramps_web() {
         .expect("call_tool should succeed at the protocol level");
     assert_ne!(result.is_error, Some(true), "got: {result:?}");
 }
+
+#[tokio::test]
+async fn get_rules_reference_succeeds_without_touching_gramps_web() {
+    let harness = McpHarness::new(test_config(false)).await;
+    let result = harness
+        .call("get_rules_reference", json!({}))
+        .await
+        .expect("call_tool should succeed at the protocol level");
+    assert_ne!(result.is_error, Some(true), "got: {result:?}");
+}
+
+// ── Media pre-flight validation (no Gramps Web) ────────────────────────────
+//
+// `create_media`/`replace_media_file` check size, declared-vs-sniffed MIME, and (for
+// replace) expected checksums entirely locally, before ever making a request — see
+// `check_size`/`resolve_mime` in `src/tools/media.rs`. These moved here from
+// `media_binary_tests.rs` precisely because they don't need Docker; what's left there needs
+// a real Gramps Web round trip (actually storing/reading bytes, privacy, not-found).
+
+fn fake_jpeg(payload: &[u8]) -> Vec<u8> {
+    let mut bytes = vec![0xFFu8, 0xD8, 0xFF, 0xE0];
+    bytes.extend_from_slice(payload);
+    bytes
+}
+
+fn fake_png(payload: &[u8]) -> Vec<u8> {
+    let mut bytes = vec![0x89u8, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+    bytes.extend_from_slice(payload);
+    bytes
+}
+
+fn base64_of(bytes: &[u8]) -> String {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD.encode(bytes)
+}
+
+#[tokio::test]
+async fn create_media_rejects_mime_mismatch() {
+    let harness = McpHarness::new(test_config(false)).await;
+    let error = expect_error_text(
+        harness
+            .call(
+                "create_media",
+                json!({
+                    "data_base64": base64_of(&fake_png(b"fake png payload")),
+                    "mime": "image/jpeg",
+                }),
+            )
+            .await,
+    );
+    assert!(error.contains("does not match"), "got: {error}");
+}
+
+#[tokio::test]
+async fn create_media_rejects_oversized_upload() {
+    let config = gramps_web_mcp_rs::config::Config {
+        mcp_max_media_bytes: 10,
+        ..test_config(false)
+    };
+    let harness = McpHarness::new(config).await;
+    let error = expect_error_text(
+        harness
+            .call(
+                "create_media",
+                json!({"data_base64": base64_of(&[0xFFu8; 11])}),
+            )
+            .await,
+    );
+    assert!(error.contains("exceeds"), "got: {error}");
+}
+
+#[tokio::test]
+async fn replace_media_file_rejects_mime_mismatch() {
+    let harness = McpHarness::new(test_config(false)).await;
+    let error = expect_error_text(
+        harness
+            .call(
+                "replace_media_file",
+                json!({
+                    "handle": "some-handle",
+                    "data_base64": base64_of(&fake_png(b"actually a png")),
+                    "mime": "application/pdf",
+                }),
+            )
+            .await,
+    );
+    assert!(error.contains("does not match"), "got: {error}");
+}
+
+#[tokio::test]
+async fn replace_media_file_rejects_expected_checksum_mismatch() {
+    let harness = McpHarness::new(test_config(false)).await;
+    let error = expect_error_text(
+        harness
+            .call(
+                "replace_media_file",
+                json!({
+                    "handle": "some-handle",
+                    "data_base64": base64_of(&fake_jpeg(b"a photo")),
+                    "expected_md5": "0".repeat(32),
+                }),
+            )
+            .await,
+    );
+    assert!(error.contains("does not match"), "got: {error}");
+}
+
+#[tokio::test]
+async fn replace_media_file_rejects_oversized_upload() {
+    let config = gramps_web_mcp_rs::config::Config {
+        mcp_max_media_bytes: 10,
+        ..test_config(false)
+    };
+    let harness = McpHarness::new(config).await;
+    let error = expect_error_text(
+        harness
+            .call(
+                "replace_media_file",
+                json!({"handle": "some-handle", "data_base64": base64_of(&[0xFFu8; 11])}),
+            )
+            .await,
+    );
+    assert!(error.contains("exceeds"), "got: {error}");
+}
+
+/// Unlike the checks above, this one isn't local — it needs *some* server to talk to — but
+/// still no Gramps Web/Docker: a tiny fake HTTP server stands in, specifically to reproduce a
+/// partial failure (binary stored, metadata PATCH failed) and confirm `create_media` surfaces
+/// the handle so the record is recoverable instead of silently orphaned.
+#[tokio::test]
+async fn create_media_surfaces_the_handle_when_metadata_application_fails() {
+    use axum::{
+        extract::Path,
+        http::StatusCode,
+        routing::{get, post},
+        Json, Router,
+    };
+
+    async fn token() -> Json<serde_json::Value> {
+        Json(json!({"access_token": "faketoken"}))
+    }
+    async fn create_media_handler() -> (StatusCode, Json<serde_json::Value>) {
+        (
+            StatusCode::CREATED,
+            Json(json!({"handle": "fakehandle0001"})),
+        )
+    }
+    async fn get_media_handler(Path(_handle): Path<String>) -> Json<serde_json::Value> {
+        Json(json!({
+            "handle": "fakehandle0001",
+            "checksum": "deadbeef",
+            "path": "/fake/path.bin",
+            "mime": "application/octet-stream",
+            "desc": "",
+            "private": false,
+        }))
+    }
+    async fn put_media_handler() -> StatusCode {
+        StatusCode::INTERNAL_SERVER_ERROR
+    }
+
+    let app = Router::new()
+        .route("/api/token/", post(token))
+        .route("/api/media/", post(create_media_handler))
+        .route(
+            "/api/media/{handle}",
+            get(get_media_handler).put(put_media_handler),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    let config = gramps_web_mcp_rs::config::Config {
+        gramps_api_url: format!("http://{addr}")
+            .parse()
+            .expect("fake server address should be a valid URL"),
+        ..test_config(false)
+    };
+    let harness = McpHarness::new(config).await;
+    let error = expect_error_text(
+        harness
+            .call(
+                "create_media",
+                json!({"data_base64": base64_of(&[0xAAu8; 16])}),
+            )
+            .await,
+    );
+    assert!(
+        error.contains("fakehandle0001"),
+        "the handle must be surfaced even though metadata application failed, got: {error}"
+    );
+}

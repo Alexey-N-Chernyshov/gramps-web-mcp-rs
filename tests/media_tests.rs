@@ -17,56 +17,88 @@
 
 #[path = "support/helpers.rs"]
 mod common;
+#[path = "support/mcp.rs"]
+mod mcp;
 
-use gramps_web_mcp_rs::{
-    client::Error,
-    tools::{create, delete, get, update},
-};
+use common::TestFixture;
+use mcp::{expect_created_handle, expect_error_text, expect_ok, expect_success, McpHarness};
+use serde_json::json;
 
 #[tokio::test]
 async fn media_from_path_round_trip() {
-    let fixture = common::TestFixture::new().await;
-    let client = &fixture.client;
+    let fixture = TestFixture::new().await;
+    let harness =
+        McpHarness::connect(&fixture.base_url, &fixture.username, common::TEST_PASS).await;
 
-    let handle = create::create_media_from_path(
-        client,
-        "/photos/test.jpg",
-        Some("Test photo"),
-        Some("image/jpeg"),
-    )
-    .await
-    .unwrap();
+    let handle = expect_created_handle(
+        harness
+            .call(
+                "create_media",
+                json!({
+                    "path": "/photos/test.jpg",
+                    "description": "Test photo",
+                    "mime": "image/jpeg",
+                }),
+            )
+            .await,
+    );
 
-    let media = get::get_object_by_handle(client, "media", &handle, get::ReadOptions::default())
-        .await
-        .unwrap();
+    let media = expect_ok(
+        harness
+            .call(
+                "get_object",
+                json!({"object_type": "media", "handle": handle}),
+            )
+            .await,
+    );
     assert_eq!(media["handle"].as_str(), Some(handle.as_str()));
     assert_eq!(media["path"].as_str(), Some("/photos/test.jpg"));
     assert_eq!(media["desc"].as_str(), Some("Test photo"));
 
-    let mut body = media.clone();
-    body["desc"] = serde_json::json!("Updated photo");
-    update::update_media(client, &handle, &body).await.unwrap();
-    let updated = get::get_object_by_handle(client, "media", &handle, get::ReadOptions::default())
-        .await
-        .unwrap();
+    expect_ok(
+        harness
+            .call(
+                "update_media",
+                json!({"handle": handle, "data": {"desc": "Updated photo"}}),
+            )
+            .await,
+    );
+    let updated = expect_ok(
+        harness
+            .call(
+                "get_object",
+                json!({"object_type": "media", "handle": handle}),
+            )
+            .await,
+    );
     assert_eq!(updated["desc"].as_str(), Some("Updated photo"));
 
-    delete::delete_object(client, "media", &handle)
-        .await
-        .unwrap();
-    assert!(matches!(
-        get::get_object_by_handle(client, "media", &handle, get::ReadOptions::default()).await,
-        Err(Error::NotFound(_))
-    ));
+    expect_success(
+        harness
+            .call(
+                "delete_object",
+                json!({"object_type": "media", "handle": handle}),
+            )
+            .await,
+    );
+    let error = expect_error_text(
+        harness
+            .call(
+                "get_object",
+                json!({"object_type": "media", "handle": handle}),
+            )
+            .await,
+    );
+    assert!(error.contains("not found"), "got: {error}");
 }
 
 #[tokio::test]
 async fn media_from_url_round_trip() {
     use tokio::io::AsyncWriteExt as _;
 
-    let fixture = common::TestFixture::new().await;
-    let client = &fixture.client;
+    let fixture = TestFixture::new().await;
+    let harness =
+        McpHarness::connect(&fixture.base_url, &fixture.username, common::TEST_PASS).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -82,13 +114,23 @@ async fn media_from_url_round_trip() {
         }
     });
 
-    let handle = create::create_media_from_url(client, &file_url, Some("Downloaded photo"), None)
-        .await
-        .unwrap();
+    let handle = expect_created_handle(
+        harness
+            .call(
+                "create_media",
+                json!({"url": file_url, "description": "Downloaded photo"}),
+            )
+            .await,
+    );
 
-    let media = get::get_object_by_handle(client, "media", &handle, get::ReadOptions::default())
-        .await
-        .unwrap();
+    let media = expect_ok(
+        harness
+            .call(
+                "get_object",
+                json!({"object_type": "media", "handle": handle}),
+            )
+            .await,
+    );
     assert_eq!(media["handle"].as_str(), Some(handle.as_str()));
     assert_eq!(media["desc"].as_str(), Some("Downloaded photo"));
     assert_eq!(media["mime"].as_str(), Some("image/jpeg"));
@@ -98,7 +140,7 @@ async fn media_from_url_round_trip() {
     let path = media["path"].as_str().unwrap_or("");
     assert!(
         !path.is_empty(),
-        "media[\"path\"] is empty after create_media_from_url (got {:?}) — \
+        "media[\"path\"] is empty after create_media (url) (got {:?}) — \
          file was not actually uploaded, only the metadata record was created",
         media["path"]
     );
@@ -106,24 +148,44 @@ async fn media_from_url_round_trip() {
     let checksum = media["checksum"].as_str().unwrap_or("");
     assert!(
         !checksum.is_empty(),
-        "media[\"checksum\"] is empty after create_media_from_url (got {:?}) — \
+        "media[\"checksum\"] is empty after create_media (url) (got {:?}) — \
          file was not actually uploaded, only the metadata record was created",
         media["checksum"]
     );
 
-    let mut body = media.clone();
-    body["desc"] = serde_json::json!("Updated downloaded photo");
-    update::update_media(client, &handle, &body).await.unwrap();
-    let updated = get::get_object_by_handle(client, "media", &handle, get::ReadOptions::default())
-        .await
-        .unwrap();
+    expect_ok(
+        harness
+            .call(
+                "update_media",
+                json!({"handle": handle, "data": {"desc": "Updated downloaded photo"}}),
+            )
+            .await,
+    );
+    let updated = expect_ok(
+        harness
+            .call(
+                "get_object",
+                json!({"object_type": "media", "handle": handle}),
+            )
+            .await,
+    );
     assert_eq!(updated["desc"].as_str(), Some("Updated downloaded photo"));
 
-    delete::delete_object(client, "media", &handle)
-        .await
-        .unwrap();
-    assert!(matches!(
-        get::get_object_by_handle(client, "media", &handle, get::ReadOptions::default()).await,
-        Err(Error::NotFound(_))
-    ));
+    expect_success(
+        harness
+            .call(
+                "delete_object",
+                json!({"object_type": "media", "handle": handle}),
+            )
+            .await,
+    );
+    let error = expect_error_text(
+        harness
+            .call(
+                "get_object",
+                json!({"object_type": "media", "handle": handle}),
+            )
+            .await,
+    );
+    assert!(error.contains("not found"), "got: {error}");
 }

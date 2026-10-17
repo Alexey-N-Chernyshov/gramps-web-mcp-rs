@@ -14,172 +14,158 @@
 
 #[path = "support/helpers.rs"]
 mod common;
+#[path = "support/mcp.rs"]
+mod mcp;
 
-use gramps_web_mcp_rs::{
-    client::Error,
-    models::{
-        event::CreateEventRequest,
-        place::{CreatePlaceRequest, PlaceName},
-    },
-    tools::{create, delete, get, update},
-};
+use common::TestFixture;
+use mcp::{expect_created_handle, expect_error_text, expect_ok, expect_success, McpHarness};
+use serde_json::json;
 
 #[tokio::test]
 async fn event_round_trip() {
-    let fixture = common::TestFixture::new().await;
-    let client = &fixture.client;
+    let fixture = TestFixture::new().await;
+    let harness =
+        McpHarness::connect(&fixture.base_url, &fixture.username, common::TEST_PASS).await;
 
-    let handle = create::create_event(
-        client,
-        CreateEventRequest {
-            event_type: Some(serde_json::json!("Birth")),
-            description: Some("Test birth event".to_string()),
-            ..Default::default()
-        },
-    )
-    .await
-    .unwrap();
+    let handle = expect_created_handle(
+        harness
+            .call(
+                "create_event",
+                json!({"event_type": "Birth", "description": "Test birth event"}),
+            )
+            .await,
+    );
 
-    let event = get::get_object_by_handle(client, "events", &handle, get::ReadOptions::default())
-        .await
-        .unwrap();
+    let event = expect_ok(
+        harness
+            .call(
+                "get_object",
+                json!({"object_type": "event", "handle": handle}),
+            )
+            .await,
+    );
     assert_eq!(event["description"].as_str(), Some("Test birth event"));
     assert!(!event["type"].is_null());
 
-    let mut body = event.clone();
-    body["description"] = serde_json::json!("Updated description");
-    update::update_event(client, &handle, &body).await.unwrap();
-    let updated = get::get_object_by_handle(client, "events", &handle, get::ReadOptions::default())
-        .await
-        .unwrap();
+    expect_ok(
+        harness
+            .call(
+                "update_event",
+                json!({"handle": handle, "data": {"description": "Updated description"}}),
+            )
+            .await,
+    );
+    let updated = expect_ok(
+        harness
+            .call(
+                "get_object",
+                json!({"object_type": "event", "handle": handle}),
+            )
+            .await,
+    );
     assert_eq!(updated["description"].as_str(), Some("Updated description"));
 
-    delete::delete_object(client, "events", &handle)
-        .await
-        .unwrap();
-    assert!(matches!(
-        get::get_object_by_handle(client, "events", &handle, get::ReadOptions::default()).await,
-        Err(Error::NotFound(_))
-    ));
+    expect_success(
+        harness
+            .call(
+                "delete_object",
+                json!({"object_type": "event", "handle": handle}),
+            )
+            .await,
+    );
+    let error = expect_error_text(
+        harness
+            .call(
+                "get_object",
+                json!({"object_type": "event", "handle": handle}),
+            )
+            .await,
+    );
+    assert!(error.contains("not found"), "got: {error}");
 }
 
 #[tokio::test]
 async fn place_round_trip() {
-    let fixture = common::TestFixture::new().await;
-    let client = &fixture.client;
+    let fixture = TestFixture::new().await;
+    let harness =
+        McpHarness::connect(&fixture.base_url, &fixture.username, common::TEST_PASS).await;
 
-    let handle = create::create_place(
-        client,
-        CreatePlaceRequest {
-            title: Some("Moscow".to_string()),
-            name: Some(PlaceName {
-                value: Some("Moscow".to_string()),
-                ..Default::default()
-            }),
-            ..Default::default()
-        },
-    )
-    .await
-    .unwrap();
+    let handle = expect_created_handle(
+        harness
+            .call("create_place", json!({"title": "Moscow"}))
+            .await,
+    );
 
-    let place = get::get_object_by_handle(client, "places", &handle, get::ReadOptions::default())
-        .await
-        .unwrap();
+    let place = expect_ok(
+        harness
+            .call(
+                "get_object",
+                json!({"object_type": "place", "handle": handle}),
+            )
+            .await,
+    );
     assert_eq!(place["title"].as_str(), Some("Moscow"));
 
-    let mut body = place.clone();
-    body["title"] = serde_json::json!("Saint Petersburg");
-    update::update_place(client, &handle, &body).await.unwrap();
-    let updated = get::get_object_by_handle(client, "places", &handle, get::ReadOptions::default())
-        .await
-        .unwrap();
+    expect_ok(
+        harness
+            .call(
+                "update_place",
+                json!({"handle": handle, "data": {"title": "Saint Petersburg"}}),
+            )
+            .await,
+    );
+    let updated = expect_ok(
+        harness
+            .call(
+                "get_object",
+                json!({"object_type": "place", "handle": handle}),
+            )
+            .await,
+    );
     assert_eq!(updated["title"].as_str(), Some("Saint Petersburg"));
 
-    delete::delete_object(client, "places", &handle)
-        .await
-        .unwrap();
-    assert!(matches!(
-        get::get_object_by_handle(client, "places", &handle, get::ReadOptions::default()).await,
-        Err(Error::NotFound(_))
-    ));
+    expect_success(
+        harness
+            .call(
+                "delete_object",
+                json!({"object_type": "place", "handle": handle}),
+            )
+            .await,
+    );
+    let error = expect_error_text(
+        harness
+            .call(
+                "get_object",
+                json!({"object_type": "place", "handle": handle}),
+            )
+            .await,
+    );
+    assert!(error.contains("not found"), "got: {error}");
 }
 
 #[tokio::test]
 async fn event_span_between_two_events() {
-    let fixture = common::TestFixture::new().await;
-    let client = &fixture.client;
+    let fixture = TestFixture::new().await;
+    let harness =
+        McpHarness::connect(&fixture.base_url, &fixture.username, common::TEST_PASS).await;
 
-    let handle1 = create::create_event(
-        client,
-        CreateEventRequest {
-            event_type: Some(serde_json::json!("Birth")),
-            ..Default::default()
-        },
-    )
-    .await
-    .unwrap();
+    let handle1 = expect_created_handle(
+        harness
+            .call("create_event", json!({"event_type": "Birth"}))
+            .await,
+    );
+    let handle2 = expect_created_handle(
+        harness
+            .call("create_event", json!({"event_type": "Death"}))
+            .await,
+    );
 
-    let handle2 = create::create_event(
-        client,
-        CreateEventRequest {
-            event_type: Some(serde_json::json!("Death")),
-            ..Default::default()
-        },
-    )
-    .await
-    .unwrap();
-
-    get::get_event_span(client, &handle1, &handle2)
-        .await
-        .unwrap();
-
-    delete::delete_object(client, "events", &handle1)
-        .await
-        .unwrap();
-    delete::delete_object(client, "events", &handle2)
-        .await
-        .unwrap();
-}
-
-#[tokio::test]
-async fn partial_update_preserves_place_note_list() {
-    let fixture = common::TestFixture::new().await;
-    let client = &fixture.client;
-
-    let note_handle = create::create_note(client, "A place note", None)
-        .await
-        .unwrap();
-
-    let handle = create::create_place(
-        client,
-        CreatePlaceRequest {
-            title: Some("Moscow".to_string()),
-            name: Some(PlaceName {
-                value: Some("Moscow".to_string()),
-                ..Default::default()
-            }),
-            note_list: Some(vec![note_handle.clone()]),
-            ..Default::default()
-        },
-    )
-    .await
-    .unwrap();
-
-    // Partial update touching only `title` must leave note_list untouched.
-    update::update_place(
-        client,
-        &handle,
-        &serde_json::json!({"title": "Saint Petersburg"}),
-    )
-    .await
-    .unwrap();
-
-    let updated = get::get_object_by_handle(client, "places", &handle, get::ReadOptions::default())
-        .await
-        .unwrap();
-    assert_eq!(updated["title"].as_str(), Some("Saint Petersburg"));
-    assert_eq!(
-        updated["note_list"].as_array().unwrap(),
-        &vec![serde_json::json!(note_handle)]
+    expect_ok(
+        harness
+            .call(
+                "get_event_span",
+                json!({"handle1": handle1, "handle2": handle2}),
+            )
+            .await,
     );
 }

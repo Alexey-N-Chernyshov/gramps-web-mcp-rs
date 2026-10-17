@@ -14,157 +14,237 @@
 
 #[path = "support/helpers.rs"]
 mod common;
+#[path = "support/mcp.rs"]
+mod mcp;
 
-use gramps_web_mcp_rs::{
-    client::Error,
-    models::{
-        event::CreateEventRequest, family::CreateFamilyRequest, person::CreatePersonRequest,
-        place::CreatePlaceRequest, source::CreateSourceRequest,
-    },
-    tools::{create, delete, get, merge},
-};
+use common::TestFixture;
+use mcp::{expect_created_handle, expect_error_text, expect_success, McpHarness};
+use serde_json::json;
 
+/// Exercises every `merge_*` tool in one pass: create two objects of a type, merge them, and
+/// confirm the duplicate is gone (survivor's handle is left in place by construction, so no
+/// `get_object` round trip is needed on the happy path itself).
 #[tokio::test]
 async fn merge_operations() {
-    let fixture = common::TestFixture::new().await;
-    let client = &fixture.client;
+    let fixture = TestFixture::new().await;
+    let harness =
+        McpHarness::connect(&fixture.base_url, &fixture.username, common::TEST_PASS).await;
 
     // merge_person
-    let p1 = create::create_person(client, CreatePersonRequest::default())
-        .await
-        .unwrap();
-    let p2 = create::create_person(client, CreatePersonRequest::default())
-        .await
-        .unwrap();
-    merge::merge_person(client, &p1, &p2, false).await.unwrap();
-    assert!(matches!(
-        get::get_object_by_handle(client, "people", &p2, get::ReadOptions::default()).await,
-        Err(Error::NotFound(_))
-    ));
-    delete::delete_object(client, "people", &p1).await.unwrap();
+    let p1 = expect_created_handle(harness.call("create_person", json!({})).await);
+    let p2 = expect_created_handle(harness.call("create_person", json!({})).await);
+    expect_success(
+        harness
+            .call(
+                "merge_person",
+                json!({"survivor_handle": p1, "duplicate_handle": p2, "family_merger": false}),
+            )
+            .await,
+    );
+    let error = expect_error_text(
+        harness
+            .call("get_object", json!({"object_type": "person", "handle": p2}))
+            .await,
+    );
+    assert!(error.contains("not found"), "got: {error}");
 
     // merge_family
-    let f1 = create::create_family(client, CreateFamilyRequest::default())
-        .await
-        .unwrap();
-    let f2 = create::create_family(client, CreateFamilyRequest::default())
-        .await
-        .unwrap();
-    merge::merge_family(client, &f1, &f2, None, None)
-        .await
-        .unwrap();
-    assert!(matches!(
-        get::get_object_by_handle(client, "families", &f2, get::ReadOptions::default()).await,
-        Err(Error::NotFound(_))
-    ));
-    delete::delete_object(client, "families", &f1)
-        .await
-        .unwrap();
+    let f1 = expect_created_handle(harness.call("create_family", json!({})).await);
+    let f2 = expect_created_handle(harness.call("create_family", json!({})).await);
+    expect_success(
+        harness
+            .call(
+                "merge_family",
+                json!({"survivor_handle": f1, "duplicate_handle": f2}),
+            )
+            .await,
+    );
+    let error = expect_error_text(
+        harness
+            .call("get_object", json!({"object_type": "family", "handle": f2}))
+            .await,
+    );
+    assert!(error.contains("not found"), "got: {error}");
 
     // merge_event
-    let e1 = create::create_event(client, CreateEventRequest::default())
-        .await
-        .unwrap();
-    let e2 = create::create_event(client, CreateEventRequest::default())
-        .await
-        .unwrap();
-    merge::merge_event(client, &e1, &e2).await.unwrap();
-    assert!(matches!(
-        get::get_object_by_handle(client, "events", &e2, get::ReadOptions::default()).await,
-        Err(Error::NotFound(_))
-    ));
-    delete::delete_object(client, "events", &e1).await.unwrap();
+    let e1 = expect_created_handle(
+        harness
+            .call("create_event", json!({"event_type": "Birth"}))
+            .await,
+    );
+    let e2 = expect_created_handle(
+        harness
+            .call("create_event", json!({"event_type": "Birth"}))
+            .await,
+    );
+    expect_success(
+        harness
+            .call(
+                "merge_event",
+                json!({"survivor_handle": e1, "duplicate_handle": e2}),
+            )
+            .await,
+    );
+    let error = expect_error_text(
+        harness
+            .call("get_object", json!({"object_type": "event", "handle": e2}))
+            .await,
+    );
+    assert!(error.contains("not found"), "got: {error}");
 
     // merge_place
-    let pl1 = create::create_place(client, CreatePlaceRequest::default())
-        .await
-        .unwrap();
-    let pl2 = create::create_place(client, CreatePlaceRequest::default())
-        .await
-        .unwrap();
-    merge::merge_place(client, &pl1, &pl2).await.unwrap();
-    assert!(matches!(
-        get::get_object_by_handle(client, "places", &pl2, get::ReadOptions::default()).await,
-        Err(Error::NotFound(_))
-    ));
-    delete::delete_object(client, "places", &pl1).await.unwrap();
+    let pl1 = expect_created_handle(harness.call("create_place", json!({"title": "A"})).await);
+    let pl2 = expect_created_handle(harness.call("create_place", json!({"title": "B"})).await);
+    expect_success(
+        harness
+            .call(
+                "merge_place",
+                json!({"survivor_handle": pl1, "duplicate_handle": pl2}),
+            )
+            .await,
+    );
+    let error = expect_error_text(
+        harness
+            .call("get_object", json!({"object_type": "place", "handle": pl2}))
+            .await,
+    );
+    assert!(error.contains("not found"), "got: {error}");
 
     // merge_note
-    let n1 = create::create_note(client, "note one", None).await.unwrap();
-    let n2 = create::create_note(client, "note two", None).await.unwrap();
-    merge::merge_note(client, &n1, &n2).await.unwrap();
-    assert!(matches!(
-        get::get_object_by_handle(client, "notes", &n2, get::ReadOptions::default()).await,
-        Err(Error::NotFound(_))
-    ));
-    delete::delete_object(client, "notes", &n1).await.unwrap();
+    let n1 = expect_created_handle(
+        harness
+            .call("create_note", json!({"text": "note one"}))
+            .await,
+    );
+    let n2 = expect_created_handle(
+        harness
+            .call("create_note", json!({"text": "note two"}))
+            .await,
+    );
+    expect_success(
+        harness
+            .call(
+                "merge_note",
+                json!({"survivor_handle": n1, "duplicate_handle": n2}),
+            )
+            .await,
+    );
+    let error = expect_error_text(
+        harness
+            .call("get_object", json!({"object_type": "note", "handle": n2}))
+            .await,
+    );
+    assert!(error.contains("not found"), "got: {error}");
 
     // merge_source + merge_citation + merge_repository
-    let src1 = create::create_source(
-        client,
-        CreateSourceRequest {
-            title: Some("Source One".to_string()),
-            ..Default::default()
-        },
-    )
-    .await
-    .unwrap();
-    let src2 = create::create_source(
-        client,
-        CreateSourceRequest {
-            title: Some("Source Two".to_string()),
-            ..Default::default()
-        },
-    )
-    .await
-    .unwrap();
+    let src1 = expect_created_handle(
+        harness
+            .call("create_source", json!({"title": "Source One"}))
+            .await,
+    );
+    let src2 = expect_created_handle(
+        harness
+            .call("create_source", json!({"title": "Source Two"}))
+            .await,
+    );
 
-    let c1 = create::create_citation(client, &src1, None).await.unwrap();
-    let c2 = create::create_citation(client, &src2, None).await.unwrap();
-    merge::merge_citation(client, &c1, &c2).await.unwrap();
-    assert!(matches!(
-        get::get_object_by_handle(client, "citations", &c2, get::ReadOptions::default()).await,
-        Err(Error::NotFound(_))
-    ));
-    delete::delete_object(client, "citations", &c1)
-        .await
-        .unwrap();
+    let c1 = expect_created_handle(
+        harness
+            .call("create_citation", json!({"source_handle": src1}))
+            .await,
+    );
+    let c2 = expect_created_handle(
+        harness
+            .call("create_citation", json!({"source_handle": src2}))
+            .await,
+    );
+    expect_success(
+        harness
+            .call(
+                "merge_citation",
+                json!({"survivor_handle": c1, "duplicate_handle": c2}),
+            )
+            .await,
+    );
+    let error = expect_error_text(
+        harness
+            .call(
+                "get_object",
+                json!({"object_type": "citation", "handle": c2}),
+            )
+            .await,
+    );
+    assert!(error.contains("not found"), "got: {error}");
 
-    merge::merge_source(client, &src1, &src2).await.unwrap();
-    assert!(matches!(
-        get::get_object_by_handle(client, "sources", &src2, get::ReadOptions::default()).await,
-        Err(Error::NotFound(_))
-    ));
-    delete::delete_object(client, "sources", &src1)
-        .await
-        .unwrap();
+    expect_success(
+        harness
+            .call(
+                "merge_source",
+                json!({"survivor_handle": src1, "duplicate_handle": src2}),
+            )
+            .await,
+    );
+    let error = expect_error_text(
+        harness
+            .call(
+                "get_object",
+                json!({"object_type": "source", "handle": src2}),
+            )
+            .await,
+    );
+    assert!(error.contains("not found"), "got: {error}");
 
-    let r1 = create::create_repository(client, "Repo One", None)
-        .await
-        .unwrap();
-    let r2 = create::create_repository(client, "Repo Two", None)
-        .await
-        .unwrap();
-    merge::merge_repository(client, &r1, &r2).await.unwrap();
-    assert!(matches!(
-        get::get_object_by_handle(client, "repositories", &r2, get::ReadOptions::default()).await,
-        Err(Error::NotFound(_))
-    ));
-    delete::delete_object(client, "repositories", &r1)
-        .await
-        .unwrap();
+    let r1 = expect_created_handle(
+        harness
+            .call("create_repository", json!({"name": "Repo One"}))
+            .await,
+    );
+    let r2 = expect_created_handle(
+        harness
+            .call("create_repository", json!({"name": "Repo Two"}))
+            .await,
+    );
+    expect_success(
+        harness
+            .call(
+                "merge_repository",
+                json!({"survivor_handle": r1, "duplicate_handle": r2}),
+            )
+            .await,
+    );
+    let error = expect_error_text(
+        harness
+            .call(
+                "get_object",
+                json!({"object_type": "repository", "handle": r2}),
+            )
+            .await,
+    );
+    assert!(error.contains("not found"), "got: {error}");
 
     // merge_media
-    let m1 = create::create_media_from_path(client, "/tmp/a.jpg", None, None)
-        .await
-        .unwrap();
-    let m2 = create::create_media_from_path(client, "/tmp/b.jpg", None, None)
-        .await
-        .unwrap();
-    merge::merge_media(client, &m1, &m2).await.unwrap();
-    assert!(matches!(
-        get::get_object_by_handle(client, "media", &m2, get::ReadOptions::default()).await,
-        Err(Error::NotFound(_))
-    ));
-    delete::delete_object(client, "media", &m1).await.unwrap();
+    let m1 = expect_created_handle(
+        harness
+            .call("create_media", json!({"path": "/tmp/a.jpg"}))
+            .await,
+    );
+    let m2 = expect_created_handle(
+        harness
+            .call("create_media", json!({"path": "/tmp/b.jpg"}))
+            .await,
+    );
+    expect_success(
+        harness
+            .call(
+                "merge_media",
+                json!({"survivor_handle": m1, "duplicate_handle": m2}),
+            )
+            .await,
+    );
+    let error = expect_error_text(
+        harness
+            .call("get_object", json!({"object_type": "media", "handle": m2}))
+            .await,
+    );
+    assert!(error.contains("not found"), "got: {error}");
 }

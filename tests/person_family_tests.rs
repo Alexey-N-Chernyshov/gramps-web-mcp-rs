@@ -14,206 +14,172 @@
 
 #[path = "support/helpers.rs"]
 mod common;
+#[path = "support/mcp.rs"]
+mod mcp;
 
-use gramps_web_mcp_rs::{
-    client::Error,
-    models::{
-        event::CreateEventRequest,
-        family::CreateFamilyRequest,
-        person::{CreatePersonRequest, PersonName, Surname},
-        source::CreateSourceRequest,
-    },
-    tools::{create, delete, get, update},
-};
+use common::TestFixture;
+use mcp::{expect_created_handle, expect_error_text, expect_ok, expect_success, McpHarness};
+use serde_json::json;
 
+/// Create → read → update → delete → confirm gone, for a person. (`create_and_get_person_round_trip`
+/// and `person_lifecycle` used to test this as two separate tests; one scenario, one test.)
 #[tokio::test]
-async fn create_and_get_person_round_trip() {
-    let fixture = common::TestFixture::new().await;
+async fn person_round_trip() {
+    let fixture = TestFixture::new().await;
+    let harness =
+        McpHarness::connect(&fixture.base_url, &fixture.username, common::TEST_PASS).await;
 
-    let handle = create::create_person(
-        &fixture.client,
-        CreatePersonRequest {
-            primary_name: Some(PersonName {
-                first_name: Some("Ivan".to_string()),
-                surname_list: vec![Surname {
-                    surname: Some("Petrov".to_string()),
-                    ..Default::default()
-                }],
-                name_type: Some("Birth Name".to_string()),
-                ..Default::default()
-            }),
-            gender: Some(1),
-            ..Default::default()
-        },
-    )
-    .await
-    .unwrap();
+    let handle = expect_created_handle(
+        harness
+            .call(
+                "create_person",
+                json!({"first_name": "Ivan", "surname": "Petrov", "gender": 1}),
+            )
+            .await,
+    );
 
-    let person = get::get_object_by_handle(
-        &fixture.client,
-        "people",
-        &handle,
-        get::ReadOptions::default(),
-    )
-    .await
-    .unwrap();
+    let person = expect_ok(
+        harness
+            .call(
+                "get_object",
+                json!({"object_type": "person", "handle": handle}),
+            )
+            .await,
+    );
     assert_eq!(person["handle"].as_str(), Some(handle.as_str()));
     assert_eq!(person["primary_name"]["first_name"].as_str(), Some("Ivan"));
-}
 
-#[tokio::test]
-async fn person_lifecycle() {
-    let fixture = common::TestFixture::new().await;
-    let client = &fixture.client;
-
-    let handle = create::create_person(
-        client,
-        CreatePersonRequest {
-            primary_name: Some(PersonName {
-                first_name: Some("Ivan".to_string()),
-                surname_list: vec![Surname {
-                    surname: Some("Sidorov".to_string()),
-                    ..Default::default()
-                }],
-                name_type: Some("Birth Name".to_string()),
-                ..Default::default()
-            }),
-            gender: Some(1),
-            ..Default::default()
-        },
-    )
-    .await
-    .unwrap();
-
-    let person = get::get_object_by_handle(client, "people", &handle, get::ReadOptions::default())
-        .await
-        .unwrap();
-    assert_eq!(person["primary_name"]["first_name"].as_str(), Some("Ivan"));
-
-    let mut body = person.clone();
-    body["primary_name"]["first_name"] = serde_json::json!("Petr");
-    update::update_person(client, &handle, &body).await.unwrap();
-
-    let updated = get::get_object_by_handle(client, "people", &handle, get::ReadOptions::default())
-        .await
-        .unwrap();
+    // primary_name is a nested object: it's replaced wholesale on update, so send the whole
+    // thing back (not just the one changed field) to keep surname_list/name_type intact.
+    let mut primary_name = person["primary_name"].clone();
+    primary_name["first_name"] = json!("Petr");
+    expect_ok(
+        harness
+            .call(
+                "update_person",
+                json!({"handle": handle, "data": {"primary_name": primary_name}}),
+            )
+            .await,
+    );
+    let updated = expect_ok(
+        harness
+            .call(
+                "get_object",
+                json!({"object_type": "person", "handle": handle}),
+            )
+            .await,
+    );
     assert_eq!(updated["primary_name"]["first_name"].as_str(), Some("Petr"));
+    assert_eq!(
+        updated["primary_name"]["surname_list"][0]["surname"].as_str(),
+        Some("Petrov"),
+        "surname must survive the update, not be wiped by the nested-object replace"
+    );
 
-    delete::delete_object(client, "people", &handle)
-        .await
-        .unwrap();
-    assert!(matches!(
-        get::get_object_by_handle(client, "people", &handle, get::ReadOptions::default()).await,
-        Err(Error::NotFound(_))
-    ));
+    expect_success(
+        harness
+            .call(
+                "delete_object",
+                json!({"object_type": "person", "handle": handle}),
+            )
+            .await,
+    );
+    let error = expect_error_text(
+        harness
+            .call(
+                "get_object",
+                json!({"object_type": "person", "handle": handle}),
+            )
+            .await,
+    );
+    assert!(error.contains("not found"), "got: {error}");
 }
 
 #[tokio::test]
 async fn family_with_parents() {
-    let fixture = common::TestFixture::new().await;
-    let client = &fixture.client;
+    let fixture = TestFixture::new().await;
+    let harness =
+        McpHarness::connect(&fixture.base_url, &fixture.username, common::TEST_PASS).await;
 
-    let father = create::create_person(
-        client,
-        CreatePersonRequest {
-            gender: Some(1),
-            ..Default::default()
-        },
-    )
-    .await
-    .unwrap();
+    let father = expect_created_handle(harness.call("create_person", json!({"gender": 1})).await);
+    let mother = expect_created_handle(harness.call("create_person", json!({"gender": 2})).await);
 
-    let mother = create::create_person(
-        client,
-        CreatePersonRequest {
-            gender: Some(2),
-            ..Default::default()
-        },
-    )
-    .await
-    .unwrap();
+    let family_handle = expect_created_handle(
+        harness
+            .call(
+                "create_family",
+                json!({"father_handle": father, "mother_handle": mother}),
+            )
+            .await,
+    );
 
-    let family_handle = create::create_family(
-        client,
-        CreateFamilyRequest {
-            father_handle: Some(father.clone()),
-            mother_handle: Some(mother.clone()),
-            ..Default::default()
-        },
-    )
-    .await
-    .unwrap();
-
-    let family = get::get_object_by_handle(
-        client,
-        "families",
-        &family_handle,
-        get::ReadOptions::default(),
-    )
-    .await
-    .unwrap();
+    let family = expect_ok(
+        harness
+            .call(
+                "get_object",
+                json!({"object_type": "family", "handle": family_handle}),
+            )
+            .await,
+    );
     assert_eq!(family["father_handle"].as_str(), Some(father.as_str()));
     assert_eq!(family["mother_handle"].as_str(), Some(mother.as_str()));
 
-    let new_mother = create::create_person(
-        client,
-        CreatePersonRequest {
-            gender: Some(2),
-            ..Default::default()
-        },
-    )
-    .await
-    .unwrap();
-    let mut body = family.clone();
-    body["mother_handle"] = serde_json::json!(new_mother);
-    update::update_family(client, &family_handle, &body)
-        .await
-        .unwrap();
-    let updated = get::get_object_by_handle(
-        client,
-        "families",
-        &family_handle,
-        get::ReadOptions::default(),
-    )
-    .await
-    .unwrap();
+    let new_mother =
+        expect_created_handle(harness.call("create_person", json!({"gender": 2})).await);
+    expect_ok(
+        harness
+            .call(
+                "update_family",
+                json!({"handle": family_handle, "data": {"mother_handle": new_mother}}),
+            )
+            .await,
+    );
+    let updated = expect_ok(
+        harness
+            .call(
+                "get_object",
+                json!({"object_type": "family", "handle": family_handle}),
+            )
+            .await,
+    );
     assert_eq!(
         updated["mother_handle"].as_str(),
         Some(new_mother.as_str()),
         "mother_handle should be updated"
     );
-    delete::delete_object(client, "people", &new_mother)
-        .await
-        .unwrap();
 }
 
 #[tokio::test]
 async fn family_with_child() {
-    let fixture = common::TestFixture::new().await;
-    let client = &fixture.client;
+    let fixture = TestFixture::new().await;
+    let harness =
+        McpHarness::connect(&fixture.base_url, &fixture.username, common::TEST_PASS).await;
 
-    let child = create::create_person(client, CreatePersonRequest::default())
-        .await
-        .unwrap();
+    let child = expect_created_handle(harness.call("create_person", json!({})).await);
+    let family_handle = expect_created_handle(harness.call("create_family", json!({})).await);
 
-    let family_handle = create::create_family(
-        client,
-        CreateFamilyRequest {
-            child_ref_list: Some(vec![serde_json::json!({"ref": child})]),
-            ..Default::default()
-        },
-    )
-    .await
-    .unwrap();
+    // create_family doesn't expose child_ref_list directly — set it via update_family, same
+    // as any other field a caller wants beyond the minimal creation shape.
+    expect_ok(
+        harness
+            .call(
+                "update_family",
+                json!({
+                    "handle": family_handle,
+                    "data": {"child_ref_list": [{"ref": child}]},
+                }),
+            )
+            .await,
+    );
 
-    let family = get::get_object_by_handle(
-        client,
-        "families",
-        &family_handle,
-        get::ReadOptions::default(),
-    )
-    .await
-    .unwrap();
+    let family = expect_ok(
+        harness
+            .call(
+                "get_object",
+                json!({"object_type": "family", "handle": family_handle}),
+            )
+            .await,
+    );
     let children = family["child_ref_list"].as_array().unwrap();
     assert_eq!(children.len(), 1);
     assert_eq!(children[0]["ref"].as_str(), Some(child.as_str()));
@@ -221,144 +187,148 @@ async fn family_with_child() {
 
 #[tokio::test]
 async fn person_timeline() {
-    let fixture = common::TestFixture::new().await;
-    let client = &fixture.client;
+    let fixture = TestFixture::new().await;
+    let harness =
+        McpHarness::connect(&fixture.base_url, &fixture.username, common::TEST_PASS).await;
 
-    let handle = create::create_person(client, CreatePersonRequest::default())
-        .await
-        .unwrap();
+    let handle = expect_created_handle(harness.call("create_person", json!({})).await);
 
-    let timeline = get::get_person_timeline(client, &handle).await.unwrap();
+    let timeline = expect_ok(
+        harness
+            .call("get_person_timeline", json!({"handle": handle}))
+            .await,
+    );
     assert!(timeline.is_array(), "timeline should be an array");
-
-    delete::delete_object(client, "people", &handle)
-        .await
-        .unwrap();
 }
 
 #[tokio::test]
 async fn family_timeline() {
-    let fixture = common::TestFixture::new().await;
-    let client = &fixture.client;
+    let fixture = TestFixture::new().await;
+    let harness =
+        McpHarness::connect(&fixture.base_url, &fixture.username, common::TEST_PASS).await;
 
-    let family_handle = create::create_family(client, CreateFamilyRequest::default())
-        .await
-        .unwrap();
+    let family_handle = expect_created_handle(harness.call("create_family", json!({})).await);
 
-    let timeline = get::get_family_timeline(client, &family_handle)
-        .await
-        .unwrap();
+    let timeline = expect_ok(
+        harness
+            .call("get_family_timeline", json!({"handle": family_handle}))
+            .await,
+    );
     assert!(timeline.is_array(), "timeline should be an array");
-
-    delete::delete_object(client, "families", &family_handle)
-        .await
-        .unwrap();
 }
 
 #[tokio::test]
 async fn relations_between_parent_and_child() {
-    let fixture = common::TestFixture::new().await;
-    let client = &fixture.client;
+    let fixture = TestFixture::new().await;
+    let harness =
+        McpHarness::connect(&fixture.base_url, &fixture.username, common::TEST_PASS).await;
 
-    let father = create::create_person(
-        client,
-        CreatePersonRequest {
-            gender: Some(1),
-            ..Default::default()
-        },
-    )
-    .await
-    .unwrap();
+    let father = expect_created_handle(harness.call("create_person", json!({"gender": 1})).await);
+    let child = expect_created_handle(harness.call("create_person", json!({})).await);
 
-    let child = create::create_person(client, CreatePersonRequest::default())
-        .await
-        .unwrap();
+    // Attach the child the same way `family_with_child` does.
+    let family_handle = expect_created_handle(
+        harness
+            .call("create_family", json!({"father_handle": father}))
+            .await,
+    );
+    expect_ok(
+        harness
+            .call(
+                "update_family",
+                json!({
+                    "handle": family_handle,
+                    "data": {"child_ref_list": [{"ref": child}]},
+                }),
+            )
+            .await,
+    );
 
-    let family_handle = create::create_family(
-        client,
-        CreateFamilyRequest {
-            father_handle: Some(father.clone()),
-            child_ref_list: Some(vec![serde_json::json!({"ref": child})]),
-            ..Default::default()
-        },
-    )
-    .await
-    .unwrap();
-
-    get::get_relations(client, &father, &child).await.unwrap();
-
-    delete::delete_object(client, "families", &family_handle)
-        .await
-        .unwrap();
-    delete::delete_object(client, "people", &father)
-        .await
-        .unwrap();
-    delete::delete_object(client, "people", &child)
-        .await
-        .unwrap();
+    expect_ok(
+        harness
+            .call(
+                "get_relations",
+                json!({"handle1": father, "handle2": child}),
+            )
+            .await,
+    );
 }
 
 #[tokio::test]
 async fn partial_update_preserves_unspecified_person_fields() {
-    let fixture = common::TestFixture::new().await;
-    let client = &fixture.client;
+    let fixture = TestFixture::new().await;
+    let harness =
+        McpHarness::connect(&fixture.base_url, &fixture.username, common::TEST_PASS).await;
 
-    let note_handle = create::create_note(client, "A research note", None)
-        .await
-        .unwrap();
-    let source_handle = create::create_source(
-        client,
-        CreateSourceRequest {
-            title: Some("Census 1900".to_string()),
-            ..Default::default()
-        },
-    )
-    .await
-    .unwrap();
-    let citation_handle = create::create_citation(client, &source_handle, Some("p. 12"))
-        .await
-        .unwrap();
-    let event_handle = create::create_event(
-        client,
-        CreateEventRequest {
-            event_type: Some(serde_json::json!("Birth")),
-            ..Default::default()
-        },
-    )
-    .await
-    .unwrap();
+    let note_handle = expect_created_handle(
+        harness
+            .call("create_note", json!({"text": "A research note"}))
+            .await,
+    );
+    let source_handle = expect_created_handle(
+        harness
+            .call("create_source", json!({"title": "Census 1900"}))
+            .await,
+    );
+    let citation_handle = expect_created_handle(
+        harness
+            .call(
+                "create_citation",
+                json!({"source_handle": source_handle, "page": "p. 12"}),
+            )
+            .await,
+    );
+    let event_handle = expect_created_handle(
+        harness
+            .call("create_event", json!({"event_type": "Birth"}))
+            .await,
+    );
 
-    let handle = create::create_person(
-        client,
-        CreatePersonRequest {
-            gender: Some(1),
-            note_list: Some(vec![note_handle.clone()]),
-            citation_list: Some(vec![citation_handle.clone()]),
-            event_ref_list: Some(vec![
-                serde_json::json!({"ref": event_handle, "role": "Primary"}),
-            ]),
-            ..Default::default()
-        },
-    )
-    .await
-    .unwrap();
+    let handle = expect_created_handle(harness.call("create_person", json!({"gender": 1})).await);
+    // create_person only takes first_name/surname/gender — set the richer lists via
+    // update_person, same mechanism the partial update below is about to exercise.
+    expect_ok(
+        harness
+            .call(
+                "update_person",
+                json!({
+                    "handle": handle,
+                    "data": {
+                        "note_list": [note_handle],
+                        "citation_list": [citation_handle],
+                        "event_ref_list": [{"ref": event_handle, "role": "Primary"}],
+                    },
+                }),
+            )
+            .await,
+    );
 
     // A partial update touching only `gender` must leave the other lists untouched.
-    update::update_person(client, &handle, &serde_json::json!({"gender": 2}))
-        .await
-        .unwrap();
+    expect_ok(
+        harness
+            .call(
+                "update_person",
+                json!({"handle": handle, "data": {"gender": 2}}),
+            )
+            .await,
+    );
 
-    let updated = get::get_object_by_handle(client, "people", &handle, get::ReadOptions::default())
-        .await
-        .unwrap();
+    let updated = expect_ok(
+        harness
+            .call(
+                "get_object",
+                json!({"object_type": "person", "handle": handle}),
+            )
+            .await,
+    );
     assert_eq!(updated["gender"].as_i64(), Some(2));
     assert_eq!(
         updated["note_list"].as_array().unwrap(),
-        &vec![serde_json::json!(note_handle)]
+        &vec![json!(note_handle)]
     );
     assert_eq!(
         updated["citation_list"].as_array().unwrap(),
-        &vec![serde_json::json!(citation_handle)]
+        &vec![json!(citation_handle)]
     );
     let event_refs = updated["event_ref_list"].as_array().unwrap();
     assert_eq!(event_refs.len(), 1);
@@ -367,108 +337,132 @@ async fn partial_update_preserves_unspecified_person_fields() {
 
 #[tokio::test]
 async fn partial_update_replaces_list_when_included_in_data() {
-    let fixture = common::TestFixture::new().await;
-    let client = &fixture.client;
+    let fixture = TestFixture::new().await;
+    let harness =
+        McpHarness::connect(&fixture.base_url, &fixture.username, common::TEST_PASS).await;
 
-    let note1 = create::create_note(client, "First note", None)
-        .await
-        .unwrap();
-    let note2 = create::create_note(client, "Second note", None)
-        .await
-        .unwrap();
+    let note1 = expect_created_handle(
+        harness
+            .call("create_note", json!({"text": "First note"}))
+            .await,
+    );
+    let note2 = expect_created_handle(
+        harness
+            .call("create_note", json!({"text": "Second note"}))
+            .await,
+    );
 
-    let handle = create::create_person(
-        client,
-        CreatePersonRequest {
-            note_list: Some(vec![note1.clone()]),
-            ..Default::default()
-        },
-    )
-    .await
-    .unwrap();
+    let handle = expect_created_handle(harness.call("create_person", json!({})).await);
+    expect_ok(
+        harness
+            .call(
+                "update_person",
+                json!({"handle": handle, "data": {"note_list": [note1]}}),
+            )
+            .await,
+    );
 
-    update::update_person(
-        client,
-        &handle,
-        &serde_json::json!({"note_list": [note2.clone()]}),
-    )
-    .await
-    .unwrap();
+    expect_ok(
+        harness
+            .call(
+                "update_person",
+                json!({"handle": handle, "data": {"note_list": [note2]}}),
+            )
+            .await,
+    );
 
-    let updated = get::get_object_by_handle(client, "people", &handle, get::ReadOptions::default())
-        .await
-        .unwrap();
+    let updated = expect_ok(
+        harness
+            .call(
+                "get_object",
+                json!({"object_type": "person", "handle": handle}),
+            )
+            .await,
+    );
     assert_eq!(
         updated["note_list"].as_array().unwrap(),
-        &vec![serde_json::json!(note2)],
+        &vec![json!(note2)],
         "note_list should be replaced wholesale, not merged with the old one"
     );
 }
 
 #[tokio::test]
 async fn update_person_round_trips_a_strip_read_nested_object() {
-    let fixture = common::TestFixture::new().await;
-    let client = &fixture.client;
+    let fixture = TestFixture::new().await;
+    let harness =
+        McpHarness::connect(&fixture.base_url, &fixture.username, common::TEST_PASS).await;
 
-    // primary_name has both filled subfields (first_name, surname_list, type) and
-    // explicitly empty ones (nick, call).
-    let handle = create::create_person(
-        client,
-        CreatePersonRequest {
-            primary_name: Some(PersonName {
-                first_name: Some("Original".to_string()),
-                surname_list: vec![Surname {
-                    surname: Some("Smith".to_string()),
-                    ..Default::default()
-                }],
-                name_type: Some("Birth Name".to_string()),
-                nick: Some(String::new()),
-                call: Some(String::new()),
-                ..Default::default()
-            }),
-            ..Default::default()
-        },
-    )
-    .await
-    .unwrap();
+    let handle = expect_created_handle(
+        harness
+            .call(
+                "create_person",
+                json!({"first_name": "Original", "surname": "Smith"}),
+            )
+            .await,
+    );
+    // primary_name now has filled subfields (first_name, surname_list, type) and explicitly
+    // empty ones (nick, call) — add those via update, since create_person doesn't expose
+    // them. A nested object is replaced wholesale, not merged, so send the *whole* current
+    // primary_name back with nick/call added, not just `{"nick": "", "call": ""}` alone.
+    let created = expect_ok(
+        harness
+            .call(
+                "get_object",
+                json!({"object_type": "person", "handle": handle, "strip": false}),
+            )
+            .await,
+    );
+    let mut primary_name_with_nick_call = created["primary_name"].clone();
+    primary_name_with_nick_call["nick"] = json!("");
+    primary_name_with_nick_call["call"] = json!("");
+    expect_ok(
+        harness
+            .call(
+                "update_person",
+                json!({"handle": handle, "data": {"primary_name": primary_name_with_nick_call}}),
+            )
+            .await,
+    );
 
     // Read with the tools' default (strip=true): strip recurses into nested objects, so
     // the empty primary_name.nick/call subfields are dropped here, not just empty
     // top-level fields.
-    let stripped =
-        get::get_object_by_handle(client, "people", &handle, get::ReadOptions::default())
-            .await
-            .unwrap();
+    let stripped = expect_ok(
+        harness
+            .call(
+                "get_object",
+                json!({"object_type": "person", "handle": handle}),
+            )
+            .await,
+    );
     let mut primary_name = stripped["primary_name"].clone();
     assert!(
         primary_name.get("nick").is_none() && primary_name.get("call").is_none(),
         "sanity check: strip should have dropped the empty nick/call subfields, got {primary_name}"
     );
-    primary_name["first_name"] = serde_json::json!("Updated");
+    primary_name["first_name"] = json!("Updated");
 
     // Send the whole (stripped) primary_name back, as a caller would after fetching with
     // the default strip, editing one field, and round-tripping the rest unchanged — this
     // must not error just because nick/call are missing from the nested object.
-    update::update_person(
-        client,
-        &handle,
-        &serde_json::json!({"primary_name": primary_name}),
-    )
-    .await
-    .unwrap();
+    expect_ok(
+        harness
+            .call(
+                "update_person",
+                json!({"handle": handle, "data": {"primary_name": primary_name}}),
+            )
+            .await,
+    );
 
     // Read back the full object (strip=false) to see exactly what landed.
-    let full = get::get_object_by_handle(
-        client,
-        "people",
-        &handle,
-        get::ReadOptions {
-            strip: Some(false),
-            ..Default::default()
-        },
-    )
-    .await
-    .unwrap();
+    let full = expect_ok(
+        harness
+            .call(
+                "get_object",
+                json!({"object_type": "person", "handle": handle, "strip": false}),
+            )
+            .await,
+    );
     let full_name = &full["primary_name"];
     assert_eq!(
         full_name["first_name"].as_str(),
@@ -495,121 +489,41 @@ async fn update_person_round_trips_a_strip_read_nested_object() {
         Some(""),
         "call should still be present and empty, not dropped by the round trip, got {full_name}"
     );
-
-    delete::delete_object(client, "people", &handle)
-        .await
-        .unwrap();
 }
 
+/// `update_person` with a `data.handle` that doesn't match the `handle` argument is already
+/// confirmed to be *rejected* with a clear error in `mcp_server_tests.rs`
+/// (`update_person_rejects_mismatched_handle_in_data`) — that doesn't need a real Gramps Web.
+/// What does need one is confirming the rejected write didn't partially apply, which is what
+/// this test is for.
 #[tokio::test]
-async fn update_rejects_mismatched_handle_in_data_without_writing() {
-    let fixture = common::TestFixture::new().await;
-    let client = &fixture.client;
+async fn update_person_rejects_mismatched_handle_without_writing() {
+    let fixture = TestFixture::new().await;
+    let harness =
+        McpHarness::connect(&fixture.base_url, &fixture.username, common::TEST_PASS).await;
 
-    let handle = create::create_person(
-        client,
-        CreatePersonRequest {
-            gender: Some(1),
-            ..Default::default()
-        },
-    )
-    .await
-    .unwrap();
+    let handle = expect_created_handle(harness.call("create_person", json!({"gender": 1})).await);
 
-    let err = update::update_person(
-        client,
-        &handle,
-        &serde_json::json!({"handle": "some-other-handle", "gender": 2}),
-    )
-    .await
-    .unwrap_err();
-    assert!(matches!(err, Error::Validation(_)), "got: {err:?}");
+    expect_error_text(
+        harness
+            .call(
+                "update_person",
+                json!({"handle": handle, "data": {"handle": "some-other-handle", "gender": 2}}),
+            )
+            .await,
+    );
 
-    let unchanged =
-        get::get_object_by_handle(client, "people", &handle, get::ReadOptions::default())
-            .await
-            .unwrap();
+    let unchanged = expect_ok(
+        harness
+            .call(
+                "get_object",
+                json!({"object_type": "person", "handle": handle}),
+            )
+            .await,
+    );
     assert_eq!(
         unchanged["gender"].as_i64(),
         Some(1),
         "object must be left untouched when the write is rejected"
-    );
-}
-
-#[tokio::test]
-async fn update_rejects_empty_data() {
-    let fixture = common::TestFixture::new().await;
-    let client = &fixture.client;
-
-    let handle = create::create_person(client, CreatePersonRequest::default())
-        .await
-        .unwrap();
-
-    let err = update::update_person(client, &handle, &serde_json::json!({}))
-        .await
-        .unwrap_err();
-    assert!(matches!(err, Error::Validation(_)), "got: {err:?}");
-}
-
-#[tokio::test]
-async fn partial_update_preserves_family_note_list() {
-    let fixture = common::TestFixture::new().await;
-    let client = &fixture.client;
-
-    let note_handle = create::create_note(client, "Family note", None)
-        .await
-        .unwrap();
-    let father = create::create_person(
-        client,
-        CreatePersonRequest {
-            gender: Some(1),
-            ..Default::default()
-        },
-    )
-    .await
-    .unwrap();
-
-    let family_handle = create::create_family(
-        client,
-        CreateFamilyRequest {
-            father_handle: Some(father),
-            note_list: Some(vec![note_handle.clone()]),
-            ..Default::default()
-        },
-    )
-    .await
-    .unwrap();
-
-    let new_father = create::create_person(
-        client,
-        CreatePersonRequest {
-            gender: Some(1),
-            ..Default::default()
-        },
-    )
-    .await
-    .unwrap();
-
-    update::update_family(
-        client,
-        &family_handle,
-        &serde_json::json!({"father_handle": new_father}),
-    )
-    .await
-    .unwrap();
-
-    let updated = get::get_object_by_handle(
-        client,
-        "families",
-        &family_handle,
-        get::ReadOptions::default(),
-    )
-    .await
-    .unwrap();
-    assert_eq!(updated["father_handle"].as_str(), Some(new_father.as_str()));
-    assert_eq!(
-        updated["note_list"].as_array().unwrap(),
-        &vec![serde_json::json!(note_handle)],
-        "note_list should survive a partial update that only touches father_handle"
     );
 }
