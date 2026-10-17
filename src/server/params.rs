@@ -111,7 +111,7 @@ pub struct GetObjectInput {
     /// Gramps ID of a specific, already-known object (e.g. "I0001"). Exactly one of
     /// `handle`/`gramps_id` is required. Not supported for "tag" — tags have no Gramps ID.
     pub gramps_id: Option<String>,
-    /// Top-level fields to return, all others omitted, e.g. ["gramps_id", "primary_name", "parent_family_list"]. Omit to return the full object.
+    /// Top-level field names only, no paths, e.g. ["gramps_id", "primary_name", "parent_family_list"] — a requested nested field is returned whole. All other top-level fields are omitted; omit `keys` entirely to return the full object.
     pub keys: Option<Vec<String>>,
 }
 
@@ -133,7 +133,7 @@ pub struct ListObjectsInput {
     pub page: Option<u32>,
     /// Results per page (default 20).
     pub pagesize: Option<u32>,
-    /// Top-level fields to return, all others omitted, e.g. ["gramps_id", "primary_name", "parent_family_list"]. Omit to return full objects.
+    /// Top-level field names only, no paths, e.g. ["gramps_id", "primary_name", "parent_family_list"] — a requested nested field is returned whole. All other top-level fields are omitted; omit `keys` entirely to return full objects.
     pub keys: Option<Vec<String>>,
 }
 
