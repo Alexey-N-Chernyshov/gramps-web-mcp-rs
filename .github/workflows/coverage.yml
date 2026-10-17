@@ -64,6 +64,11 @@ jobs:
             export "${key}=${value}"
           done <<< "$show_env"
 
+          # rust-cache restores target/ across runs, which can leave stale .profraw files
+          # from a previous run's instrumented binaries lying around — `cargo test` doesn't
+          # overwrite .profraw per run, it adds to whatever's already there, so without this
+          # the report can silently count coverage for code that no longer exists.
+          cargo llvm-cov clean --workspace
           cargo test --lib --bins --tests
           cargo llvm-cov report --lcov --output-path lcov.info
 

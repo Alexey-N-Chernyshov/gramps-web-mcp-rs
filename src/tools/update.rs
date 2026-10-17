@@ -50,14 +50,38 @@ fn fetch_path(endpoint: &str, handle: &str) -> String {
     format!("/api/{endpoint}/{handle}")
 }
 
-/// Read-modify-write a top-level patch onto the object at `/api/{endpoint}/{handle}`.
+/// Apply a JSON Merge Patch (RFC 7396) of `patch` onto `target`, in place.
+///
+/// Recurses only when both sides are objects; otherwise `patch`'s value replaces `target`'s
+/// wholesale (so a list is always replaced whole, never merged element-by-element). A `null`
+/// in `patch` removes the corresponding key from `target`.
+fn merge_patch(target: &mut serde_json::Value, patch: &serde_json::Value) {
+    let (Some(patch_obj), Some(target_obj)) = (patch.as_object(), target.as_object_mut()) else {
+        *target = patch.clone();
+        return;
+    };
+    for (key, value) in patch_obj {
+        if value.is_null() {
+            target_obj.remove(key);
+        } else {
+            merge_patch(
+                target_obj
+                    .entry(key.clone())
+                    .or_insert(serde_json::Value::Null),
+                value,
+            );
+        }
+    }
+}
+
+/// Read-modify-write a JSON Merge Patch (RFC 7396) onto the object at
+/// `/api/{endpoint}/{handle}`.
 ///
 /// Gramps Web's PUT replaces the object wholesale, so sending just the fields the caller
 /// wants to change would silently drop everything else (citation_list, note_list, ...).
-/// This fetches the current object first and overlays `data`'s top-level keys onto it
-/// before writing it back. The merge is shallow by design: a list or nested object in
-/// `data` replaces the corresponding value whole, rather than being merged recursively,
-/// so callers get predictable behavior instead of surprising deep-merge semantics.
+/// This fetches the current object first and merges `data` onto it per RFC 7396 before
+/// writing it back: nested objects merge recursively, while a list or scalar in `data`
+/// replaces the corresponding value whole, and `null` removes a field.
 ///
 /// There is an inherent GET/PUT race: a concurrent write between the two could be lost.
 async fn update_with_merge(
@@ -69,14 +93,12 @@ async fn update_with_merge(
     let patch = validate_patch(data, handle)?;
 
     let mut current: serde_json::Value = client.get(&fetch_path(endpoint, handle)).await?;
-    let current_obj = current.as_object_mut().ok_or_else(|| {
-        Error::Parse(format!(
+    if current.as_object().is_none() {
+        return Err(Error::Parse(format!(
             "expected GET /api/{endpoint}/{handle} to return a JSON object"
-        ))
-    })?;
-    for (key, value) in patch {
-        current_obj.insert(key.clone(), value.clone());
+        )));
     }
+    merge_patch(&mut current, &serde_json::Value::Object(patch.clone()));
 
     client
         .put(&format!("/api/{endpoint}/{handle}"), &current)
@@ -190,6 +212,77 @@ mod tests {
         let data = serde_json::json!({"handle": "H1", "gender": 1});
         let patch = validate_patch(&data, "H1").unwrap();
         assert_eq!(patch["gender"], 1);
+    }
+
+    #[test]
+    fn merge_patch_merges_nested_objects_recursively() {
+        let mut target = serde_json::json!({"primary_name": {"first_name": "Ivan", "surname_list": ["Petrov"], "type": "Birth Name"}});
+        let patch = serde_json::json!({"primary_name": {"first_name": "Petr"}});
+        merge_patch(&mut target, &patch);
+        assert_eq!(
+            target,
+            serde_json::json!({"primary_name": {"first_name": "Petr", "surname_list": ["Petrov"], "type": "Birth Name"}})
+        );
+    }
+
+    #[test]
+    fn merge_patch_replaces_arrays_wholesale() {
+        let mut target = serde_json::json!({"tag_list": ["a", "b", "c"]});
+        let patch = serde_json::json!({"tag_list": ["z"]});
+        merge_patch(&mut target, &patch);
+        assert_eq!(target, serde_json::json!({"tag_list": ["z"]}));
+    }
+
+    #[test]
+    fn merge_patch_null_removes_key() {
+        let mut target = serde_json::json!({"a": "b", "c": "d"});
+        let patch = serde_json::json!({"a": null});
+        merge_patch(&mut target, &patch);
+        assert_eq!(target, serde_json::json!({"c": "d"}));
+    }
+
+    #[test]
+    fn merge_patch_scalar_replaces_object() {
+        let mut target = serde_json::json!({"a": {"b": "c"}});
+        let patch = serde_json::json!({"a": "scalar"});
+        merge_patch(&mut target, &patch);
+        assert_eq!(target, serde_json::json!({"a": "scalar"}));
+    }
+
+    #[test]
+    fn merge_patch_object_replaces_scalar() {
+        let mut target = serde_json::json!({"a": "scalar"});
+        let patch = serde_json::json!({"a": {"b": "c"}});
+        merge_patch(&mut target, &patch);
+        assert_eq!(target, serde_json::json!({"a": {"b": "c"}}));
+    }
+
+    /// The worked example from RFC 7396 §3.
+    #[test]
+    fn merge_patch_rfc7396_section_3_example() {
+        let mut target = serde_json::json!({
+            "a": "b",
+            "c": {
+                "d": "e",
+                "f": "g"
+            }
+        });
+        let patch = serde_json::json!({
+            "a": "z",
+            "c": {
+                "f": null
+            }
+        });
+        merge_patch(&mut target, &patch);
+        assert_eq!(
+            target,
+            serde_json::json!({
+                "a": "z",
+                "c": {
+                    "d": "e"
+                }
+            })
+        );
     }
 
     #[test]

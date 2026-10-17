@@ -319,11 +319,12 @@ fn json_object_or_null_schema(_: &mut schemars::SchemaGenerator) -> schemars::Sc
 #[derive(Deserialize, JsonSchema)]
 pub struct UpdateInput {
     pub handle: String,
-    /// Only the fields to change; everything else on the record is left untouched. A list
-    /// or nested object you include replaces the existing value as a whole (not merged
-    /// field-by-field) — to add to a list, read it first via get_object and send back the
-    /// complete list. Must not be empty, and if it includes `handle`, it must match the
-    /// `handle` argument.
+    /// Only the fields to change; everything else on the record is left untouched. Applied
+    /// as a JSON Merge Patch (RFC 7396): nested objects merge field-by-field, but a list you
+    /// include (e.g. citation_list, surname_list) replaces the existing value as a whole —
+    /// to add to a list, read it first via get_object and send back the complete list. A
+    /// `null` value removes that field. Must not be empty, and if it includes `handle`, it
+    /// must match the `handle` argument.
     /// For dates: "date": {"dateval": [day, month, year, 0], "text": null}, e.g.
     /// [15, 6, 1867, 0] for June 15, 1867. Use 0 for day/month if unknown.
     #[schemars(schema_with = "json_object_schema")]

@@ -860,8 +860,8 @@ cross-checked against the file's actual content.")]
     // ── Update ──────────────────────────────────────────────────────────────
 
     #[tool(
-        description = "Update an existing person: pass only changed fields (see server \
-instructions)."
+        description = "Update an existing person: data is a JSON Merge Patch, RFC 7396 — pass only \
+changed fields (see server instructions)."
     )]
     async fn update_person(
         &self,
@@ -875,8 +875,8 @@ instructions)."
     }
 
     #[tool(
-        description = "Update an existing family: pass only changed fields (see server \
-instructions)."
+        description = "Update an existing family: data is a JSON Merge Patch, RFC 7396 — pass only \
+changed fields (see server instructions)."
     )]
     async fn update_family(
         &self,
@@ -890,8 +890,8 @@ instructions)."
     }
 
     #[tool(
-        description = "Update an existing event: pass only changed fields (see server \
-instructions)."
+        description = "Update an existing event: data is a JSON Merge Patch, RFC 7396 — pass only \
+changed fields (see server instructions)."
     )]
     async fn update_event(
         &self,
@@ -905,8 +905,8 @@ instructions)."
     }
 
     #[tool(
-        description = "Update an existing place: pass only changed fields (see server \
-instructions)."
+        description = "Update an existing place: data is a JSON Merge Patch, RFC 7396 — pass only \
+changed fields (see server instructions)."
     )]
     async fn update_place(
         &self,
@@ -920,8 +920,8 @@ instructions)."
     }
 
     #[tool(
-        description = "Update an existing source: pass only changed fields (see server \
-instructions)."
+        description = "Update an existing source: data is a JSON Merge Patch, RFC 7396 — pass only \
+changed fields (see server instructions)."
     )]
     async fn update_source(
         &self,
@@ -935,8 +935,8 @@ instructions)."
     }
 
     #[tool(
-        description = "Update an existing citation: pass only changed fields (see server \
-instructions)."
+        description = "Update an existing citation: data is a JSON Merge Patch, RFC 7396 — pass \
+only changed fields (see server instructions)."
     )]
     async fn update_citation(
         &self,
@@ -950,8 +950,8 @@ instructions)."
     }
 
     #[tool(
-        description = "Update an existing repository: pass only changed fields (see server \
-instructions)."
+        description = "Update an existing repository: data is a JSON Merge Patch, RFC 7396 — pass \
+only changed fields (see server instructions)."
     )]
     async fn update_repository(
         &self,
@@ -965,8 +965,8 @@ instructions)."
     }
 
     #[tool(
-        description = "Update an existing note: pass only changed fields (see server \
-instructions)."
+        description = "Update an existing note: data is a JSON Merge Patch, RFC 7396 — pass only \
+changed fields (see server instructions)."
     )]
     async fn update_note(
         &self,
@@ -980,8 +980,8 @@ instructions)."
     }
 
     #[tool(
-        description = "Update an existing tag: pass only changed fields (see server \
-instructions)."
+        description = "Update an existing tag: data is a JSON Merge Patch, RFC 7396 — pass only \
+changed fields (see server instructions)."
     )]
     async fn update_tag(
         &self,
@@ -995,9 +995,9 @@ instructions)."
     }
 
     #[tool(
-        description = "Update an existing media object's metadata: pass only changed fields \
-(see server instructions). To replace the underlying file itself, use replace_media_file \
-instead."
+        description = "Update an existing media object's metadata: data is a JSON Merge Patch, RFC \
+7396 — pass only changed fields (see server instructions). To replace the \
+underlying file itself, use replace_media_file instead."
     )]
     async fn update_media(
         &self,
