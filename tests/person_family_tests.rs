@@ -49,15 +49,14 @@ async fn person_round_trip() {
     assert_eq!(person["handle"].as_str(), Some(handle.as_str()));
     assert_eq!(person["primary_name"]["first_name"].as_str(), Some("Ivan"));
 
-    // primary_name is a nested object: it's replaced wholesale on update, so send the whole
-    // thing back (not just the one changed field) to keep surname_list/name_type intact.
-    let mut primary_name = person["primary_name"].clone();
-    primary_name["first_name"] = json!("Petr");
+    // primary_name is a nested object: `data` is a JSON Merge Patch (RFC 7396), so a
+    // partial patch here merges into the existing primary_name field-by-field instead of
+    // replacing it wholesale.
     expect_ok(
         harness
             .call(
                 "update_person",
-                json!({"handle": handle, "data": {"primary_name": primary_name}}),
+                json!({"handle": handle, "data": {"primary_name": {"first_name": "Petr"}}}),
             )
             .await,
     );
@@ -73,7 +72,12 @@ async fn person_round_trip() {
     assert_eq!(
         updated["primary_name"]["surname_list"][0]["surname"].as_str(),
         Some("Petrov"),
-        "surname must survive the update, not be wiped by the nested-object replace"
+        "surname must survive the update, not be wiped out by the merge patch"
+    );
+    assert_eq!(
+        updated["primary_name"]["type"].as_str(),
+        Some("Birth Name"),
+        "name type must survive the update, not be wiped out by the merge patch"
     );
 
     expect_success(
@@ -387,7 +391,7 @@ async fn partial_update_replaces_list_when_included_in_data() {
 }
 
 #[tokio::test]
-async fn update_person_round_trips_a_strip_read_nested_object() {
+async fn update_person_merge_patch_preserves_other_nested_fields() {
     let fixture = TestFixture::new().await;
     let harness =
         McpHarness::connect(&fixture.base_url, &fixture.username, common::TEST_PASS).await;
@@ -400,26 +404,15 @@ async fn update_person_round_trips_a_strip_read_nested_object() {
             )
             .await,
     );
-    // primary_name now has filled subfields (first_name, surname_list, type) and explicitly
-    // empty ones (nick, call) — add those via update, since create_person doesn't expose
-    // them. A nested object is replaced wholesale, not merged, so send the *whole* current
-    // primary_name back with nick/call added, not just `{"nick": "", "call": ""}` alone.
-    let created = expect_ok(
-        harness
-            .call(
-                "get_object",
-                json!({"object_type": "person", "handle": handle, "strip": false}),
-            )
-            .await,
-    );
-    let mut primary_name_with_nick_call = created["primary_name"].clone();
-    primary_name_with_nick_call["nick"] = json!("");
-    primary_name_with_nick_call["call"] = json!("");
+    // primary_name now has filled subfields (first_name, surname_list, type) but
+    // create_person doesn't expose nick/call — add those with a minimal merge patch
+    // (RFC 7396): it merges into the existing primary_name field-by-field, so there's no
+    // need to read the object first and round-trip its other subfields back.
     expect_ok(
         harness
             .call(
                 "update_person",
-                json!({"handle": handle, "data": {"primary_name": primary_name_with_nick_call}}),
+                json!({"handle": handle, "data": {"primary_name": {"nick": "", "call": ""}}}),
             )
             .await,
     );
@@ -435,21 +428,19 @@ async fn update_person_round_trips_a_strip_read_nested_object() {
             )
             .await,
     );
-    let mut primary_name = stripped["primary_name"].clone();
+    let primary_name = &stripped["primary_name"];
     assert!(
         primary_name.get("nick").is_none() && primary_name.get("call").is_none(),
         "sanity check: strip should have dropped the empty nick/call subfields, got {primary_name}"
     );
-    primary_name["first_name"] = json!("Updated");
 
-    // Send the whole (stripped) primary_name back, as a caller would after fetching with
-    // the default strip, editing one field, and round-tripping the rest unchanged — this
-    // must not error just because nick/call are missing from the nested object.
+    // Patch just first_name — a merge patch, so this must not disturb nick/call even
+    // though the stripped read above never saw them.
     expect_ok(
         harness
             .call(
                 "update_person",
-                json!({"handle": handle, "data": {"primary_name": primary_name}}),
+                json!({"handle": handle, "data": {"primary_name": {"first_name": "Updated"}}}),
             )
             .await,
     );

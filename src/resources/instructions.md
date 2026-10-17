@@ -25,10 +25,14 @@ record with `get_object`. When you need several already-known objects
 (e.g. the parents of a list of families), use `list_objects`'s `handles`
 in one call instead of a series of `get_object` calls.
 
-`update_*` tools do a shallow merge: pass in `data` only the fields you
-want to change, and every other field already on the record is preserved.
-A list or nested object you do include (e.g. `citation_list`, `note_list`,
-`primary_name`) replaces that value as a whole rather than being merged
-field-by-field — to add an item to a list, fetch the current one with
-`get_object` first and send back the complete list. If `data` includes
-`handle`, it must match the `handle` argument.
+`update_*` tools apply `data` as a JSON Merge Patch (RFC 7396): pass in only
+the fields you want to change, and every other field already on the record
+is preserved. A nested object (e.g. `primary_name`) is merged recursively,
+field-by-field, so a partial patch like `{"primary_name": {"first_name":
+"Petr"}}` changes just that field and leaves `surname_list`/`type`/etc.
+alone. Lists (e.g. `surname_list`, `citation_list`, `note_list`) are
+replaced whole, not merged — to change one item, read the list with
+`get_object` first and send back the complete list. A `null` value removes
+a field (Gramps Web may reject removing a required field — to clear a
+value, send an empty value instead). If `data` includes `handle`, it must
+match the `handle` argument.
