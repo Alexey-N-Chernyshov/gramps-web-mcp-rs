@@ -72,6 +72,8 @@ pub struct Config {
     pub mcp_auth_token: Option<SecretString>,
     #[serde(default)]
     pub mcp_allowed_hosts: Option<String>,
+    #[serde(default)]
+    pub mcp_allowed_origins: Option<String>,
     #[serde(default = "default_mcp_keep_alive")]
     pub mcp_keep_alive: u64,
     #[serde(default = "default_max_media_bytes")]
@@ -105,6 +107,9 @@ impl Config {
     }
 
     fn validate(&self) -> Result<()> {
+        if let Some(raw) = &self.mcp_allowed_origins {
+            parse_allowed_origins(raw)?;
+        }
         if self.mcp_oauth_enabled {
             if self.mcp_oauth_storage_key.is_none() {
                 return Err(Error::Invalid(
@@ -139,6 +144,44 @@ pub fn parse_allowed_hosts(raw: &str) -> Vec<String> {
         .collect()
 }
 
+/// Parses a comma-separated `MCP_ALLOWED_ORIGINS` value for
+/// `StreamableHttpServerConfig::with_allowed_origins` and our own CORS
+/// layer. Each entry must carry a scheme (`http://`/`https://`) — an entry
+/// without one would simply never match a browser's `Origin` header, so we
+/// reject it at startup instead of silently ignoring it. An entry may end
+/// in `:*` to match that scheme and host on any port.
+pub fn parse_allowed_origins(raw: &str) -> Result<Vec<String>> {
+    raw.split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| {
+            if s.starts_with("http://") || s.starts_with("https://") {
+                Ok(s.to_owned())
+            } else {
+                Err(Error::Invalid(format!(
+                    "invalid MCP_ALLOWED_ORIGINS entry {s:?}: must start with http:// or https://"
+                )))
+            }
+        })
+        .collect()
+}
+
+/// Matches a browser `Origin` header against a list parsed by
+/// [`parse_allowed_origins`]. An entry ending in `:*` matches its
+/// scheme+host on any port (including none); any other entry must equal
+/// the origin exactly.
+pub fn origin_matches(origin: &str, allowed: &[String]) -> bool {
+    allowed.iter().any(|entry| match entry.strip_suffix(":*") {
+        Some(prefix) => {
+            origin == prefix
+                || origin
+                    .strip_prefix(prefix)
+                    .is_some_and(|rest| rest.starts_with(':'))
+        }
+        None => origin == entry,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -157,5 +200,71 @@ mod tests {
     #[test]
     fn parse_allowed_hosts_only_commas() {
         assert!(parse_allowed_hosts(", ,").is_empty());
+    }
+
+    #[test]
+    fn parse_allowed_origins_trims_and_filters() {
+        let result =
+            parse_allowed_origins("https://app.example.com, http://localhost:5173 ,https://x.io")
+                .unwrap();
+        assert_eq!(
+            result,
+            vec![
+                "https://app.example.com",
+                "http://localhost:5173",
+                "https://x.io"
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_allowed_origins_empty_string() {
+        assert!(parse_allowed_origins("").unwrap().is_empty());
+    }
+
+    #[test]
+    fn parse_allowed_origins_only_commas() {
+        assert!(parse_allowed_origins(", ,").unwrap().is_empty());
+    }
+
+    #[test]
+    fn parse_allowed_origins_keeps_port_wildcard() {
+        let result = parse_allowed_origins("http://localhost:*").unwrap();
+        assert_eq!(result, vec!["http://localhost:*"]);
+    }
+
+    #[test]
+    fn parse_allowed_origins_rejects_entry_without_scheme() {
+        let err = parse_allowed_origins("example.com").unwrap_err();
+        assert!(matches!(err, Error::Invalid(_)));
+    }
+
+    #[test]
+    fn parse_allowed_origins_rejects_bare_host_among_valid_entries() {
+        let err = parse_allowed_origins("https://good.example, localhost").unwrap_err();
+        assert!(matches!(err, Error::Invalid(_)));
+    }
+
+    #[test]
+    fn origin_matches_exact_entry() {
+        let allowed = vec!["https://app.example.com".to_string()];
+        assert!(origin_matches("https://app.example.com", &allowed));
+        assert!(!origin_matches("https://app.example.com:8443", &allowed));
+        assert!(!origin_matches("http://app.example.com", &allowed));
+        assert!(!origin_matches("https://evil.example", &allowed));
+    }
+
+    #[test]
+    fn origin_matches_port_wildcard() {
+        let allowed = vec!["http://localhost:*".to_string()];
+        assert!(origin_matches("http://localhost", &allowed));
+        assert!(origin_matches("http://localhost:5173", &allowed));
+        assert!(!origin_matches("https://localhost:5173", &allowed));
+        assert!(!origin_matches("http://localhostevil.com", &allowed));
+    }
+
+    #[test]
+    fn origin_matches_empty_allow_list_matches_nothing() {
+        assert!(!origin_matches("https://app.example.com", &[]));
     }
 }

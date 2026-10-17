@@ -34,9 +34,16 @@ DNS-rebinding protection: the server only accepts requests whose `Host` header m
 
 Required whenever the endpoint is reachable from the internet — bearer tokens travel in a plain header, and in OAuth mode so does the user's Gramps Web password during the `/authorize` login. The server itself only speaks plain HTTP; TLS termination is the reverse proxy's job (see [setup-server-public.md](setup-server-public.md)).
 
-## CORS
+## Origin validation and CORS
 
-`src/main.rs` currently sets `Access-Control-Allow-Origin: *` (any origin, any method among GET/POST/DELETE, any header). In practice this matters less than it sounds: every request still needs a valid bearer token (static or OAuth) to do anything, and an arbitrary website's script has no way to obtain one.
+Most MCP clients don't run in a browser and don't send an `Origin` header at all — these are unaffected by anything below.
+
+For requests that do carry an `Origin` header (i.e. from a browser), two independent checks apply:
+
+- `/mcp` itself rejects a disallowed `Origin` with `403`, regardless of CORS. By default (`MCP_ALLOWED_ORIGINS` unset), any present `Origin` is rejected. Set `MCP_ALLOWED_ORIGINS` to a comma-separated allow-list (each entry needs a scheme, e.g. `https://app.example.com` or `http://localhost:*` for any port) to let specific browser-based clients — e.g. MCP Inspector — through.
+- The server only sends CORS headers (`Access-Control-Allow-Origin`, etc.) when `MCP_ALLOWED_ORIGINS` is set, and only for origins on that list — never a wildcard. With it unset, no CORS headers are sent at all, so a browser page can't read any response even if something else let the request through.
+
+A plain HTML form submission to `/authorize` (the OAuth login page) is not subject to either check in a way that would break it: it's a top-level navigation, not a `fetch`/XHR, so CORS doesn't apply, and `/authorize` isn't behind the `/mcp` Origin check.
 
 ## Unauthenticated routes
 
