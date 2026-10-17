@@ -19,14 +19,15 @@
 //! Docker) don't touch at all: tool names as published over MCP, JSON-RPC argument parsing,
 //! and `server.rs`'s own early `CallToolResult::error` branches and network-error mapping.
 //!
-//! Two of `server.rs`'s validation branches are deliberately *not* duplicated here:
-//! `get_object`'s handle/gramps_id branches (neither/both/tag+gramps_id) just forward
-//! `get::resolve_object_lookup`'s error, and `list_objects`'s `handles` conflicts
-//! (handles+rules/sort, handles>100) just forward `get::validate_handles`'s — both are
-//! already thoroughly unit-tested as pure functions in `src/tools/get.rs`, and `update_*`'s
-//! data validation (empty/non-object/mismatched handle) is likewise already unit-tested as
-//! `validate_patch` in `src/tools/update.rs`. Testing them again here through JSON-RPC would
-//! just re-verify the same pure-function logic through an extra layer of indirection.
+//! `get_object`'s handle/gramps_id branches forward `get::resolve_object_lookup`'s error,
+//! `list_objects`'s `handles` conflicts forward `get::validate_handles`'s, and `update_*`'s
+//! data checks forward `update::validate_patch`'s — all three are already thoroughly
+//! unit-tested as pure functions (`src/tools/get.rs`, `src/tools/update.rs`), so the tests
+//! below for those branches don't re-verify that *logic*. They check the *wiring*: that
+//! `server.rs` actually calls the right function with the parsed arguments and turns its
+//! `Err` into a `CallToolResult::error` the caller can read, which the pure-function unit
+//! tests can't see at all (they call the function directly, never through JSON-RPC
+//! argument parsing or `server.rs`'s own match arms).
 
 #[path = "support/mcp.rs"]
 mod mcp;
@@ -192,6 +193,155 @@ async fn unknown_tool_name_returns_a_clear_error() {
     let harness = McpHarness::new(test_config(false)).await;
     let error = expect_error_text(harness.call("not_a_real_tool", json!({})).await);
     assert!(error.contains("tool not found"), "got: {error}");
+}
+
+// ── server.rs wiring for already-unit-tested pure-function validation ─────
+//
+// `get::resolve_object_lookup`, `get::validate_handles`, and `update::validate_patch` each
+// have their own unit tests covering the validation logic itself. These tests don't repeat
+// that — they check that `server.rs` actually wires the parsed arguments into the right
+// function and turns its `Err` into a readable `CallToolResult::error`, without ever
+// reaching Gramps Web.
+
+#[tokio::test]
+async fn get_object_rejects_neither_handle_nor_gramps_id() {
+    let harness = McpHarness::new(test_config(false)).await;
+    let error = expect_error_text(
+        harness
+            .call("get_object", json!({"object_type": "person"}))
+            .await,
+    );
+    assert!(
+        error.contains("handle") && error.contains("gramps_id"),
+        "got: {error}"
+    );
+}
+
+#[tokio::test]
+async fn get_object_rejects_both_handle_and_gramps_id() {
+    let harness = McpHarness::new(test_config(false)).await;
+    let error = expect_error_text(
+        harness
+            .call(
+                "get_object",
+                json!({"object_type": "person", "handle": "H1", "gramps_id": "I0001"}),
+            )
+            .await,
+    );
+    assert!(error.contains("only one"), "got: {error}");
+}
+
+#[tokio::test]
+async fn get_object_rejects_gramps_id_for_tags() {
+    let harness = McpHarness::new(test_config(false)).await;
+    let error = expect_error_text(
+        harness
+            .call(
+                "get_object",
+                json!({"object_type": "tag", "gramps_id": "I0001"}),
+            )
+            .await,
+    );
+    assert!(
+        error.contains("gramps_id") && error.contains("handle"),
+        "got: {error}"
+    );
+}
+
+#[tokio::test]
+async fn list_objects_rejects_handles_combined_with_rules() {
+    let harness = McpHarness::new(test_config(false)).await;
+    let error = expect_error_text(
+        harness
+            .call(
+                "list_objects",
+                json!({
+                    "object_type": "person",
+                    "handles": ["H1"],
+                    "rules": {"rules": []},
+                }),
+            )
+            .await,
+    );
+    assert!(
+        error.contains("handles") && error.contains("rules"),
+        "got: {error}"
+    );
+}
+
+#[tokio::test]
+async fn list_objects_rejects_handles_combined_with_sort() {
+    let harness = McpHarness::new(test_config(false)).await;
+    let error = expect_error_text(
+        harness
+            .call(
+                "list_objects",
+                json!({
+                    "object_type": "person",
+                    "handles": ["H1"],
+                    "sort": ["gramps_id"],
+                }),
+            )
+            .await,
+    );
+    assert!(
+        error.contains("handles") && error.contains("sort"),
+        "got: {error}"
+    );
+}
+
+#[tokio::test]
+async fn list_objects_rejects_more_than_100_handles() {
+    let harness = McpHarness::new(test_config(false)).await;
+    let handles: Vec<String> = (0..101).map(|i| format!("H{i}")).collect();
+    let error = expect_error_text(
+        harness
+            .call(
+                "list_objects",
+                json!({"object_type": "person", "handles": handles}),
+            )
+            .await,
+    );
+    assert!(error.contains("100"), "got: {error}");
+}
+
+#[tokio::test]
+async fn update_person_rejects_empty_data() {
+    let harness = McpHarness::new(test_config(false)).await;
+    let error = expect_error_text(
+        harness
+            .call("update_person", json!({"handle": "H1", "data": {}}))
+            .await,
+    );
+    assert!(error.contains("empty"), "got: {error}");
+}
+
+#[tokio::test]
+async fn update_person_rejects_non_object_data() {
+    let harness = McpHarness::new(test_config(false)).await;
+    let error = expect_error_text(
+        harness
+            .call(
+                "update_person",
+                json!({"handle": "H1", "data": "not-an-object"}),
+            )
+            .await,
+    );
+    assert!(error.contains("JSON object"), "got: {error}");
+}
+
+#[tokio::test]
+async fn update_person_rejects_mismatched_handle_in_data() {
+    let harness = McpHarness::new(test_config(false)).await;
+    let error = expect_error_text(
+        harness
+            .call(
+                "update_person",
+                json!({"handle": "H1", "data": {"handle": "H2"}}),
+            )
+            .await,
+    );
+    assert!(error.contains("H1") && error.contains("H2"), "got: {error}");
 }
 
 // ── Network error mapping ──────────────────────────────────────────────────
