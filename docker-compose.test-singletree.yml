@@ -1,0 +1,8 @@
+services:
+  grampsweb-test-singletree:
+    image: ghcr.io/gramps-project/grampsweb:26.10.1
+    ports:
+      - "5000"
+    environment:
+      GRAMPSWEB_TREE: testdb
+      GRAMPSWEB_SECRET_KEY: integration-test-singletree-secret

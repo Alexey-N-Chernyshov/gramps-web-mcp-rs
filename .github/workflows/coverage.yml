@@ -81,8 +81,29 @@ jobs:
         with:
           tool: cargo-llvm-cov
 
+      # `unit` (--lib --bins) never touches Gramps Web. Every other leg's tests share one
+      # Gramps Web instance via `GRAMPS_TEST_URL` instead of each spinning up its own
+      # docker-compose stack through testcontainers (see tests/support/helpers.rs) — a
+      # CI runner only ever runs one matrix leg, so "one stack per workflow step" here is
+      # the same "one stack per test run" the test code itself does locally.
+      - name: Start Gramps Web test stack
+        if: matrix.name != 'unit'
+        run: |
+          docker compose -f docker-compose.test.yml up -d
+          port=$(docker compose -f docker-compose.test.yml port grampsweb-test 5000 | cut -d: -f2)
+          for _ in $(seq 1 60); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:$port/api/metadata/") || true
+            [ "$code" != "000" ] && break
+            sleep 1
+          done
+          echo "GRAMPS_TEST_URL=http://localhost:$port" >> "$GITHUB_ENV"
+
       - name: Run coverage (${{ matrix.name }})
         run: cargo llvm-cov ${{ matrix.args }} --lcov --output-path lcov.info
+
+      - name: Stop Gramps Web test stack
+        if: always() && matrix.name != 'unit'
+        run: docker compose -f docker-compose.test.yml down -v
 
       - name: Upload lcov artifact
         uses: actions/upload-artifact@v7
