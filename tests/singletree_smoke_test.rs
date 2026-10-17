@@ -46,9 +46,9 @@ async fn login_write_and_read_round_trip_in_single_tree_mode() {
     let mut compose = DockerCompose::with_local_client(&[COMPOSE_FILE]).with_wait_for_service(
         SERVICE,
         WaitFor::http(
-            HttpWaitStrategy::new("/api/metadata/")
+            HttpWaitStrategy::new("/ready")
                 .with_port(PORT.tcp())
-                .with_response_matcher(|_| true),
+                .with_expected_status_code(200u16),
         ),
     );
 

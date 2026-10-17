@@ -170,9 +170,9 @@ async fn start_and_park(tx: std::sync::mpsc::Sender<Result<String, String>>) {
         .with_wait_for_service(
             SERVICE,
             WaitFor::http(
-                HttpWaitStrategy::new("/api/metadata/")
+                HttpWaitStrategy::new("/ready")
                     .with_port(PORT.tcp())
-                    .with_response_matcher(|_| true),
+                    .with_expected_status_code(200u16),
             ),
         );
 
@@ -226,12 +226,41 @@ async fn admin_login(base_url: &str) -> Result<String, String> {
 }
 
 /// Ensures the shared site admin exists, tolerating the case where a previous run against
-/// this same (intentionally reused, see `ensure_stack`) container already created it.
+/// this same (intentionally reused, see `ensure_stack`) container already created it. Also
+/// where `GRAMPS_TEST_URL`'s stack readiness is waited for (see `wait_ready`) — once, in the
+/// same gate, before the first real request to it.
 async fn ensure_admin(base_url: &str) {
     static ADMIN_READY: tokio::sync::OnceCell<()> = tokio::sync::OnceCell::const_new();
     ADMIN_READY
-        .get_or_init(|| async { register_admin(base_url).await })
+        .get_or_init(|| async {
+            wait_ready(base_url).await;
+            register_admin(base_url).await;
+        })
         .await;
+}
+
+/// Polls Gramps Web's own unauthenticated readiness endpoint until it returns 200, for up to
+/// 180s. The local (testcontainers) path doesn't need this — its own wait strategy (see
+/// `start_and_park`) already confirmed readiness before `ensure_stack` returns — but
+/// `GRAMPS_TEST_URL` names a stack that `coverage.yml` starts in the background and doesn't
+/// wait for at all, relying on this instead.
+async fn wait_ready(base_url: &str) {
+    let http = reqwest::Client::new();
+    let deadline = std::time::Instant::now() + Duration::from_secs(180);
+    loop {
+        if let Ok(resp) = http.get(format!("{base_url}/ready")).send().await {
+            if resp.status().is_success() {
+                return;
+            }
+        }
+        if std::time::Instant::now() >= deadline {
+            panic!(
+                "Gramps Web at {base_url} did not become ready (GET /ready never returned \
+                 200) within 180 seconds"
+            );
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
 }
 
 async fn register_admin(base_url: &str) {

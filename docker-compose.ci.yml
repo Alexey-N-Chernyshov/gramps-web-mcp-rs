@@ -1,0 +1,9 @@
+# Overlay for CI only (see .github/workflows/coverage.yml): a fixed host port, so the
+# workflow can know the stack's URL before it's even up (it starts the stack in the
+# background and runs `cargo llvm-cov` immediately — the test fixture itself waits for
+# readiness via GET /ready, see tests/support/helpers.rs). Local runs use testcontainers,
+# which assigns a random host port instead — this file is never applied there.
+services:
+  grampsweb-test:
+    ports:
+      - "5055:5000"

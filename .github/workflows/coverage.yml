@@ -21,81 +21,41 @@ jobs:
     name: Coverage
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
 
-      # Backgrounded (not awaited here) so the image pull + container creation overlaps with
-      # the toolchain/cache/build steps below instead of blocking in front of them. `--wait`
-      # makes this `up -d` itself block on the compose file's healthcheck, so no manual
-      # readiness polling is needed later — just waiting for this backgrounded command to
-      # finish. `nohup` keeps it alive past this step's own shell exiting; the PID file lets
-      # a later step (a fresh shell — bash's own `wait` can't reach across that) poll for it.
+      # Backgrounded and not waited for here at all: the test fixture itself waits for
+      # readiness (GET /ready, see tests/support/helpers.rs) once GRAMPS_TEST_URL is set, so
+      # this just needs to be kicked off before "Run coverage" — the image pull + container
+      # start overlap with the toolchain/cache steps below instead of blocking in front of
+      # them. docker-compose.ci.yml fixes the host port so the URL is known upfront.
       - name: Start Gramps Web test stack (background)
         run: |
-          nohup sh -c '
-            docker compose -f docker-compose.test.yml up -d --wait --wait-timeout 60
-            echo $? > compose-up.exit
-          ' > compose.log 2>&1 &
-          echo $! > compose-up.pid
+          nohup docker compose -f docker-compose.test.yml -f docker-compose.ci.yml up -d \
+            > compose.log 2>&1 &
 
       - name: Install Rust toolchain
         run: rustup toolchain install stable --profile minimal --component llvm-tools-preview
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          # Bumped from `coverage`: that key's existing cache was built under the old
-          # (pre-show-env-persist) flags, so every run restored a mismatched cache,
-          # recompiled everything anyway, and never saved a cache that actually matched —
-          # a new key starts a cache line that matches how this job builds now.
           shared-key: coverage-v2
       - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
           tool: cargo-llvm-cov
 
-      # Builds under coverage instrumentation while the stack above starts up, and persists
-      # `show-env`'s variables to $GITHUB_ENV so "Run coverage" (a fresh shell) reuses this
-      # exact build instead of re-deriving the environment and recompiling.
-      - name: Build tests under coverage instrumentation
-        run: |
-          # $GITHUB_ENV doesn't unquote values like a shell would, so strip show-env's
-          # quotes here. One call, reused for both export and $GITHUB_ENV, since calling
-          # show-env again in this shell triggers its own "nested show-env" warning.
-          show_env=$(cargo llvm-cov show-env)
-          while IFS= read -r line; do
-            key=${line%%=*}
-            value=${line#*=}
-            value=${value#\'}
-            value=${value%\'}
-            export "${key}=${value}"
-            echo "${key}=${value}" >> "$GITHUB_ENV"
-          done <<< "$show_env"
-
-          cargo llvm-cov clean --workspace
-          cargo build --lib --bins --tests
-
-      - name: Wait for the Gramps Web test stack
-        run: |
-          pid=$(cat compose-up.pid)
-          while kill -0 "$pid" 2>/dev/null; do sleep 1; done
-
-          if [ "$(cat compose-up.exit)" != "0" ]; then
-            echo "::error::Gramps Web test stack did not become healthy within 60 seconds"
-            cat compose.log
-            docker compose -f docker-compose.test.yml logs
-            exit 1
-          fi
-
-          port=$(docker compose -f docker-compose.test.yml port grampsweb-test 5000 | cut -d: -f2)
-          echo "GRAMPS_TEST_URL=http://localhost:$port" >> "$GITHUB_ENV"
-
       - name: Run coverage
-        run: |
-          cargo test --lib --bins --tests
-          cargo llvm-cov report --lcov --output-path lcov.info
+        env:
+          GRAMPS_TEST_URL: http://localhost:5055
+        run: cargo llvm-cov --lib --bins --tests --lcov --output-path lcov.info
 
-      - name: Stop Gramps Web test stack
-        if: always()
-        run: docker compose -f docker-compose.test.yml down -v
+      # Runner is thrown away after the job either way, so there's no teardown step —
+      # only logs, and only when something actually went wrong.
+      - name: Show Gramps Web logs
+        if: failure()
+        run: |
+          cat compose.log
+          docker compose -f docker-compose.test.yml -f docker-compose.ci.yml logs
 
       - name: Upload to Codecov
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
