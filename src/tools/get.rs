@@ -99,9 +99,10 @@ pub async fn get_object(
 
 /// Extra query options shared by every read path (`get_object`'s handle/gramps_id lookups
 /// and `list_objects`'s collection browse) on top of their own structural parameters
-/// (gramps_id/rules/page/pagesize). `keys`/`strip`/`profile` today; expected growth spot for
-/// `handles`/`sort` — add a field here and a branch in `query_params`, not a new parameter
-/// on every function below.
+/// (gramps_id/rules/page/pagesize/handles). `keys`/`strip`/`profile` today; expected growth
+/// spot for anything else that's just "ask for more/less of the same object" — add a field
+/// here and a branch in `query_params`. `handles` lives on `get_object_collection` itself,
+/// not here, since (unlike these) it's mutually exclusive with `rules`/`page`/`pagesize`.
 #[derive(Default, Clone, Copy)]
 pub struct ReadOptions<'a> {
     pub keys: Option<&'a [String]>,
@@ -197,8 +198,16 @@ pub async fn get_object_by_gramps_id(
     gramps_id: &str,
     opts: ReadOptions<'_>,
 ) -> Result<serde_json::Value> {
-    let collection =
-        get_object_collection(client, endpoint, Some(gramps_id), None, None, None, opts).await?;
+    let collection = get_object_collection(
+        client,
+        endpoint,
+        CollectionQuery {
+            gramps_id: Some(gramps_id),
+            ..Default::default()
+        },
+        opts,
+    )
+    .await?;
     let items = expect_array(endpoint, collection)?;
     resolve_gramps_id_match(endpoint, gramps_id, items)
 }
@@ -239,32 +248,86 @@ fn resolve_gramps_id_match(
     }
 }
 
-pub async fn get_object_collection(
-    client: &GrampsClient,
-    endpoint: &str,
-    gramps_id: Option<&str>,
+/// Maximum number of `handles` per `list_objects` call. Comma-joined handles land in the
+/// request's query string (~28 chars each, including URL-encoding and the separator); a
+/// reverse proxy's default header-size limit (nginx's ~8KB, say) caps how many fit in one
+/// request, so this stays comfortably under that regardless of deployment.
+pub const MAX_HANDLES: usize = 100;
+
+/// Validates `list_objects`'s `handles` argument before any API call:
+/// - Gramps Web ignores `rules`/`page`/`pagesize` entirely once `handles` is given (it's
+///   handled before filtering/pagination) — rejected here instead of silently dropped.
+/// - more than `MAX_HANDLES` handles is rejected rather than silently truncated or sent as
+///   an oversized request that risks a proxy error.
+///
+/// A no-op when `handles` is `None` or empty.
+pub fn validate_handles(
+    handles: Option<&[String]>,
     rules: Option<&serde_json::Value>,
     page: Option<u32>,
     pagesize: Option<u32>,
+) -> std::result::Result<(), String> {
+    let Some(handles) = handles.filter(|h| !h.is_empty()) else {
+        return Ok(());
+    };
+    if rules.is_some() || page.is_some() || pagesize.is_some() {
+        return Err(
+            "`handles` cannot be combined with `rules`/`page`/`pagesize` — Gramps Web \
+             ignores them once `handles` is given (handles are resolved before filtering \
+             or pagination), so combining would silently drop your filter/pagination \
+             instead of erroring. Make separate calls."
+                .to_string(),
+        );
+    }
+    if handles.len() > MAX_HANDLES {
+        return Err(format!(
+            "`handles` has {} entries, which exceeds the limit of {MAX_HANDLES} — split into \
+             batches of ≤{MAX_HANDLES}.",
+            handles.len()
+        ));
+    }
+    Ok(())
+}
+
+/// Structural parameters selecting *which* objects `list_objects` returns from a
+/// collection — as opposed to `ReadOptions`, which only affects how much of each selected
+/// object comes back. `handles` is mutually exclusive with the rest in practice (Gramps Web
+/// silently ignores `rules`/`page`/`pagesize` once `handles` is given); see `validate_handles`.
+#[derive(Default)]
+pub struct CollectionQuery<'a> {
+    pub gramps_id: Option<&'a str>,
+    pub rules: Option<&'a serde_json::Value>,
+    pub page: Option<u32>,
+    pub pagesize: Option<u32>,
+    pub handles: Option<&'a [String]>,
+}
+
+pub async fn get_object_collection(
+    client: &GrampsClient,
+    endpoint: &str,
+    query: CollectionQuery<'_>,
     opts: ReadOptions<'_>,
 ) -> Result<serde_json::Value> {
     let mut params: Vec<String> = Vec::new();
-    if let Some(id) = gramps_id {
+    if let Some(id) = query.gramps_id {
         params.push(format!("gramps_id={}", urlencoding::encode(id)));
     }
-    if let Some(r) = rules {
+    if let Some(r) = query.rules {
         let encoded = serde_json::to_string(r).unwrap_or_default();
         params.push(format!("rules={}", urlencoding::encode(&encoded)));
     }
     // Gramps Web defaults `page` to 0, which disables pagination entirely and
     // makes it silently ignore `pagesize`. If the caller wants a capped page but
     // didn't say which one, assume the first.
-    let page = page.or(pagesize.is_some().then_some(1));
+    let page = query.page.or(query.pagesize.is_some().then_some(1));
     if let Some(p) = page {
         params.push(format!("page={p}"));
     }
-    if let Some(ps) = pagesize {
+    if let Some(ps) = query.pagesize {
         params.push(format!("pagesize={ps}"));
+    }
+    if let Some(hp) = csv_param("handles", query.handles) {
+        params.push(hp);
     }
     params.extend(opts.query_params());
     let path = if params.is_empty() {
@@ -316,6 +379,49 @@ mod tests {
     fn resolve_object_lookup_allows_handle_for_tags() {
         let lookup = resolve_object_lookup("tags", Some("T1".to_string()), None).unwrap();
         assert!(matches!(lookup, ObjectLookup::Handle(h) if h == "T1"));
+    }
+
+    #[test]
+    fn validate_handles_none_or_empty_is_always_ok() {
+        assert!(validate_handles(None, None, None, None).is_ok());
+        let empty: Vec<String> = vec![];
+        assert!(
+            validate_handles(Some(&empty), Some(&serde_json::json!({})), Some(1), Some(1)).is_ok()
+        );
+    }
+
+    #[test]
+    fn validate_handles_alone_is_ok() {
+        let handles = vec!["H1".to_string(), "H2".to_string()];
+        assert!(validate_handles(Some(&handles), None, None, None).is_ok());
+    }
+
+    #[test]
+    fn validate_handles_rejects_rules() {
+        let handles = vec!["H1".to_string()];
+        let rules = serde_json::json!({"rules": []});
+        let err = validate_handles(Some(&handles), Some(&rules), None, None).unwrap_err();
+        assert!(err.contains("rules"), "got: {err}");
+    }
+
+    #[test]
+    fn validate_handles_rejects_page_or_pagesize() {
+        let handles = vec!["H1".to_string()];
+        assert!(validate_handles(Some(&handles), None, Some(1), None).is_err());
+        assert!(validate_handles(Some(&handles), None, None, Some(20)).is_err());
+    }
+
+    #[test]
+    fn validate_handles_rejects_more_than_max() {
+        let handles: Vec<String> = (0..=MAX_HANDLES).map(|i| format!("H{i}")).collect();
+        let err = validate_handles(Some(&handles), None, None, None).unwrap_err();
+        assert!(err.contains(&MAX_HANDLES.to_string()), "got: {err}");
+    }
+
+    #[test]
+    fn validate_handles_accepts_exactly_max() {
+        let handles: Vec<String> = (0..MAX_HANDLES).map(|i| format!("H{i}")).collect();
+        assert!(validate_handles(Some(&handles), None, None, None).is_ok());
     }
 
     #[test]

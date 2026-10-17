@@ -168,10 +168,13 @@ async fn get_object_collection_pagination_and_gramps_id() {
     let all = get::get_object_collection(
         client,
         "people",
-        None,
-        None,
-        None,
-        None,
+        get::CollectionQuery {
+            gramps_id: None,
+            rules: None,
+            page: None,
+            pagesize: None,
+            handles: None,
+        },
         get::ReadOptions::default(),
     )
     .await
@@ -185,10 +188,13 @@ async fn get_object_collection_pagination_and_gramps_id() {
     let page1 = get::get_object_collection(
         client,
         "people",
-        None,
-        None,
-        Some(1),
-        Some(1),
+        get::CollectionQuery {
+            gramps_id: None,
+            rules: None,
+            page: Some(1),
+            pagesize: Some(1),
+            handles: None,
+        },
         get::ReadOptions::default(),
     )
     .await
@@ -207,10 +213,13 @@ async fn get_object_collection_pagination_and_gramps_id() {
     let by_id = get::get_object_collection(
         client,
         "people",
-        Some(gramps_id),
-        None,
-        None,
-        None,
+        get::CollectionQuery {
+            gramps_id: Some(gramps_id),
+            rules: None,
+            page: None,
+            pagesize: None,
+            handles: None,
+        },
         get::ReadOptions::default(),
     )
     .await
@@ -384,10 +393,13 @@ async fn list_objects_with_rules_and_keys_restricts_every_item() {
     let result = get::get_object_collection(
         client,
         "people",
-        None,
-        Some(&rules),
-        None,
-        None,
+        get::CollectionQuery {
+            gramps_id: None,
+            rules: Some(&rules),
+            page: None,
+            pagesize: None,
+            handles: None,
+        },
         get::ReadOptions {
             keys: Some(&keys),
             ..Default::default()
@@ -443,10 +455,13 @@ async fn list_objects_with_empty_keys_returns_full_objects() {
     let result = get::get_object_collection(
         client,
         "people",
-        Some(gramps_id),
-        None,
-        None,
-        None,
+        get::CollectionQuery {
+            gramps_id: Some(gramps_id),
+            rules: None,
+            page: None,
+            pagesize: None,
+            handles: None,
+        },
         get::ReadOptions {
             keys: Some(&empty_keys),
             strip: Some(false),
@@ -589,10 +604,13 @@ async fn list_objects_with_rules_keys_and_strip_combined() {
     let result = get::get_object_collection(
         client,
         "people",
-        None,
-        Some(&rules),
-        None,
-        None,
+        get::CollectionQuery {
+            gramps_id: None,
+            rules: Some(&rules),
+            page: None,
+            pagesize: None,
+            handles: None,
+        },
         get::ReadOptions {
             keys: Some(&keys),
             strip: Some(true),
@@ -764,10 +782,13 @@ async fn list_objects_with_rules_and_profile() {
     let result = get::get_object_collection(
         client,
         "people",
-        None,
-        Some(&rules),
-        None,
-        None,
+        get::CollectionQuery {
+            gramps_id: None,
+            rules: Some(&rules),
+            page: None,
+            pagesize: None,
+            handles: None,
+        },
         get::ReadOptions {
             profile: Some(&profile_sections),
             ..Default::default()
@@ -788,6 +809,141 @@ async fn list_objects_with_rules_and_profile() {
     delete::delete_object(client, "people", &handle)
         .await
         .unwrap();
+}
+
+#[tokio::test]
+async fn list_objects_with_handles_preserves_requested_order() {
+    let fixture = common::TestFixture::new().await;
+    let client = &fixture.client;
+
+    let h1 = create::create_person(client, CreatePersonRequest::default())
+        .await
+        .unwrap();
+    let h2 = create::create_person(client, CreatePersonRequest::default())
+        .await
+        .unwrap();
+    let h3 = create::create_person(client, CreatePersonRequest::default())
+        .await
+        .unwrap();
+
+    // Deliberately out of creation order.
+    let handles = vec![h3.clone(), h1.clone(), h2.clone()];
+    let result = get::get_object_collection(
+        client,
+        "people",
+        get::CollectionQuery {
+            handles: Some(&handles),
+            ..Default::default()
+        },
+        get::ReadOptions::default(),
+    )
+    .await
+    .unwrap();
+
+    let items = result.as_array().expect("expected an array");
+    let returned_handles: Vec<&str> = items
+        .iter()
+        .map(|i| i["handle"].as_str().expect("handle missing"))
+        .collect();
+    assert_eq!(
+        returned_handles,
+        vec![h3.as_str(), h1.as_str(), h2.as_str()],
+        "handles should come back in the requested order, not creation order"
+    );
+
+    delete::delete_object(client, "people", &h1).await.unwrap();
+    delete::delete_object(client, "people", &h2).await.unwrap();
+    delete::delete_object(client, "people", &h3).await.unwrap();
+}
+
+#[tokio::test]
+async fn list_objects_with_handles_skips_unknown_handle() {
+    let fixture = common::TestFixture::new().await;
+    let client = &fixture.client;
+
+    let h1 = create::create_person(client, CreatePersonRequest::default())
+        .await
+        .unwrap();
+    let h2 = create::create_person(client, CreatePersonRequest::default())
+        .await
+        .unwrap();
+
+    let handles = vec![h1.clone(), "NONEXISTENT_HANDLE".to_string(), h2.clone()];
+    let result = get::get_object_collection(
+        client,
+        "people",
+        get::CollectionQuery {
+            handles: Some(&handles),
+            ..Default::default()
+        },
+        get::ReadOptions::default(),
+    )
+    .await
+    .unwrap();
+
+    let items = result.as_array().expect("expected an array");
+    assert_eq!(
+        items.len(),
+        2,
+        "the unknown handle should be silently skipped rather than erroring, got {items:?}"
+    );
+    let returned_handles: Vec<&str> = items
+        .iter()
+        .map(|i| i["handle"].as_str().expect("handle missing"))
+        .collect();
+    assert_eq!(returned_handles, vec![h1.as_str(), h2.as_str()]);
+
+    delete::delete_object(client, "people", &h1).await.unwrap();
+    delete::delete_object(client, "people", &h2).await.unwrap();
+}
+
+#[tokio::test]
+async fn list_objects_with_handles_and_keys_restricts_every_item() {
+    let fixture = common::TestFixture::new().await;
+    let client = &fixture.client;
+
+    let h1 = create::create_person(client, CreatePersonRequest::default())
+        .await
+        .unwrap();
+    let h2 = create::create_person(client, CreatePersonRequest::default())
+        .await
+        .unwrap();
+
+    let handles = vec![h1.clone(), h2.clone()];
+    let keys = vec!["gramps_id".to_string()];
+    let result = get::get_object_collection(
+        client,
+        "people",
+        get::CollectionQuery {
+            handles: Some(&handles),
+            ..Default::default()
+        },
+        get::ReadOptions {
+            keys: Some(&keys),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    let items = result.as_array().expect("expected an array");
+    assert_eq!(items.len(), 2);
+    for item in items {
+        let fields: Vec<&str> = item
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            fields,
+            vec!["gramps_id"],
+            "handles + keys should still restrict each item to the requested fields, got {fields:?}"
+        );
+    }
+
+    delete::delete_object(client, "people", &h1).await.unwrap();
+    delete::delete_object(client, "people", &h2).await.unwrap();
 }
 
 #[tokio::test]
@@ -874,10 +1030,13 @@ async fn rules_filter_people_by_gramps_id() {
     let result = get::get_object_collection(
         client,
         "people",
-        None,
-        Some(&rules),
-        None,
-        None,
+        get::CollectionQuery {
+            gramps_id: None,
+            rules: Some(&rules),
+            page: None,
+            pagesize: None,
+            handles: None,
+        },
         get::ReadOptions::default(),
     )
     .await
@@ -896,10 +1055,13 @@ async fn rules_filter_people_by_gramps_id() {
     let paged = get::get_object_collection(
         client,
         "people",
-        None,
-        Some(&rules),
-        Some(1),
-        Some(1),
+        get::CollectionQuery {
+            gramps_id: None,
+            rules: Some(&rules),
+            page: Some(1),
+            pagesize: Some(1),
+            handles: None,
+        },
         get::ReadOptions::default(),
     )
     .await
@@ -951,10 +1113,13 @@ async fn rules_filter_pagesize_without_page_still_caps_results() {
     let paged = get::get_object_collection(
         client,
         "people",
-        None,
-        Some(&rules),
-        None,
-        Some(2),
+        get::CollectionQuery {
+            gramps_id: None,
+            rules: Some(&rules),
+            page: None,
+            pagesize: Some(2),
+            handles: None,
+        },
         get::ReadOptions::default(),
     )
     .await
@@ -1004,10 +1169,13 @@ async fn rules_filter_families_by_child_count() {
     let result = get::get_object_collection(
         client,
         "families",
-        None,
-        Some(&rules),
-        None,
-        None,
+        get::CollectionQuery {
+            gramps_id: None,
+            rules: Some(&rules),
+            page: None,
+            pagesize: None,
+            handles: None,
+        },
         get::ReadOptions::default(),
     )
     .await

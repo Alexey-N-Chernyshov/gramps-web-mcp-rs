@@ -21,7 +21,9 @@ field still comes back whole. Empty fields are omitted by default — a
 missing field means empty. For overview listings of people, prefer
 `profile: ["self"]` together with `keys: ["gramps_id", "parent_family_list"]`
 over full objects. Once you have a `handle` or `gramps_id`, read the full
-record with `get_object`.
+record with `get_object`. When you need several already-known objects
+(e.g. the parents of a list of families), use `list_objects`'s `handles`
+in one call instead of a series of `get_object` calls.
 
 `update_*` tools do a shallow merge: pass in `data` only the fields you
 want to change, and every other field already on the record is preserved.

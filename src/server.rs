@@ -295,6 +295,7 @@ Use `page`/`pagesize` to paginate (default page=1, pagesize=20).")]
             keys,
             strip,
             profile,
+            handles,
         }): Parameters<ListObjectsInput>,
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
@@ -305,23 +306,26 @@ Use `page`/`pagesize` to paginate (default page=1, pagesize=20).")]
                  \"person\", \"family\", \"event\", \"place\", \"note\", \"citation\", \"source\", \"media\", \"repository\", \"tag\"",
             )]));
         };
+        if let Err(msg) = get::validate_handles(handles.as_deref(), rules.as_ref(), page, pagesize)
+        {
+            return Ok(CallToolResult::error(vec![ContentBlock::text(msg)]));
+        }
         let profile = profile_strings(profile);
         let opts = get::ReadOptions {
             keys: keys.as_deref(),
             strip,
             profile: profile.as_deref(),
         };
-        get::get_object_collection(
-            &client,
-            object_type.as_endpoint(),
-            None,
-            rules.as_ref(),
+        let query = get::CollectionQuery {
+            rules: rules.as_ref(),
             page,
             pagesize,
-            opts,
-        )
-        .await
-        .map_or_else(api_err, ok_json)
+            handles: handles.as_deref(),
+            ..Default::default()
+        };
+        get::get_object_collection(&client, object_type.as_endpoint(), query, opts)
+            .await
+            .map_or_else(api_err, ok_json)
     }
 
     #[tool(

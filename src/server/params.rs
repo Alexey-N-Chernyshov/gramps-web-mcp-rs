@@ -174,6 +174,9 @@ pub struct ListObjectsInput {
     pub strip: Option<bool>,
     /// Adds a pre-formatted `profile` summary to each object; "self" is usually enough for lists.
     pub profile: Option<Vec<ProfileSection>>,
+    /// Fetch these specific, already-known objects in one call, in the given order; unknown
+    /// handles are skipped rather than erroring. Cannot be combined with `rules`/`page`/`pagesize`.
+    pub handles: Option<Vec<String>>,
 }
 
 #[derive(Deserialize, JsonSchema, Debug)]
