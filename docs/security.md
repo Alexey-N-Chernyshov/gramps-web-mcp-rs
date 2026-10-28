@@ -2,21 +2,40 @@
 
 ## Trust boundaries
 
-`client → MCP server → Gramps Web API`. The MCP server holds the credentials that reach Gramps Web: a single service account's username/password or sync token (static mode), or, per user, that user's Gramps Web refresh token (OAuth mode). Whoever passes the MCP server's own authentication gets to act as that Gramps identity, with its Gramps Web role's rights.
+`client → MCP server → Gramps Web API` — two separate boundaries, each with its own, independently-configured auth:
+
+1. **Client → MCP server**: is this caller allowed to use this server at all? Only meaningful over HTTP — stdio has no such boundary, see below.
+2. **MCP server → Gramps Web API**: which Gramps Web identity does the server act as on this caller's behalf? Applies the same way regardless of transport.
+
+The two are independent, with one exception: turning OAuth on answers both at once (see the OAuth rows below).
 
 ## stdio
 
-No network exposure. The server is a child process of the AI client, talking over stdin/stdout; the OS process boundary is the only boundary there is.
+No network exposure, so no boundary 1 at all. The server is a child process of the AI client, talking over stdin/stdout; the OS process boundary is the only one there is. Boundary 2 (which Gramps identity) still applies exactly as below.
 
-## HTTP auth modes
+## Boundary 1: client → MCP server (HTTP only)
 
-| Mode         | Gramps identity used                                                                        | Revocation                                                                                                                                                                             | When to use                                                                                                                                                                |
-| ------------ | ------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| None         | The configured service account (`GRAMPS_USERNAME`/`GRAMPS_PASSWORD` or `GRAMPS_SYNC_TOKEN`) | There's no token to revoke — anyone who can reach the port already has full access. Set `MCP_AUTH_TOKEN` to close this off.                                                            | Never on the open internet. A trusted LAN/VPN only — the server logs a warning ("HTTP auth disabled — set MCP_AUTH_TOKEN for public deployments") when it starts this way. |
-| Static token | Same single service account                                                                 | Change `MCP_AUTH_TOKEN` and restart.                                                                                                                                                   | Single user or a small trusted group, simplest to set up.                                                                                                                  |
-| OAuth        | Whichever Gramps Web account signed in at `/authorize` for that session                     | Disable or delete the user in Gramps Web — takes effect within ~15 minutes. Changing just their password does **not** revoke access. This server has no per-session revoke of its own. | Several people who should each keep their own Gramps Web role.                                                                                                             |
+| Mode         | Config                                               | Revocation                                                                                                                                                                                                | When to use                                                                                                                   |
+| ------------ | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| None         | neither `MCP_AUTH_TOKEN` nor `MCP_OAUTH_ENABLED` set | There's no token to revoke — anyone who can reach the port already has full access. The server logs a warning ("HTTP auth disabled — set MCP_AUTH_TOKEN for public deployments") when it starts this way. | Never on the open internet. A trusted LAN/VPN only.                                                                           |
+| Static token | `MCP_AUTH_TOKEN`                                     | Change it and restart.                                                                                                                                                                                    | Single user or a small trusted group, simplest to set up.                                                                     |
+| OAuth        | `MCP_OAUTH_ENABLED=true`                             | Per session — see boundary 2's OAuth row below; this server has no separate per-session revoke of its own.                                                                                                | Several people, where each should also keep their own Gramps Web role (forces boundary 2 into per-user mode too — see below). |
 
-`GRAMPS_SYNC_TOKEN` holds a persistent Gramps Web **sync token** (Settings → User settings → Account → Access tokens → Add sync device), not a short-lived JWT: the server exchanges it for one via `POST /api/token/sync/` and re-exchanges it automatically as that JWT expires, so there's nothing to refresh manually. Revoke it the same way you'd revoke any other access token, from that same Access tokens screen in Gramps Web — no server restart or `SECRET_KEY` rotation needed, since revocation is scoped to that one token. See [gramps-project/gramps-web-api#1032](https://github.com/gramps-project/gramps-web-api/pull/1032), which added sync tokens.
+## Boundary 2: MCP server → Gramps Web API
+
+| Mode              | Config                              | Identity                                                                 | Revocation                                                                                                                                                                            |
+| ----------------- | ----------------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Username/password | `GRAMPS_USERNAME`/`GRAMPS_PASSWORD` | One fixed service account, shared by every caller that passes boundary 1 | Change the account's password in Gramps Web and restart with the new one.                                                                                                             |
+| Sync token        | `GRAMPS_SYNC_TOKEN`                 | Same — one fixed service account                                         | Revoke the token itself from Gramps Web's Access tokens screen (Settings → User settings → Account → Access tokens) — no restart, no `SECRET_KEY` rotation, scoped to that one token. |
+| Per-user (OAuth)  | `MCP_OAUTH_ENABLED=true`            | Whichever Gramps Web account signed in at `/authorize` for that session  | Disable or delete the user in Gramps Web — takes effect within ~15 minutes. Changing just their password does **not** revoke access.                                                  |
+
+Choose exactly one:
+
+1. **Username/password** — kept for backward compatibility; prefer sync token or OAuth instead.
+2. **Sync token** — exchanged for a short-lived JWT via `POST /api/token/sync/`, re-exchanged automatically as that JWT expires, nothing to refresh manually. Narrower blast radius than username/password if it leaks: the exchanged JWT can read/write tree data but can't change the account's own password/email or manage its access tokens, which a full password login can. Requires Gramps Web 26.10.0+ (gramps-web-api 3.23+ — see [gramps-project/gramps-web-api#1032](https://github.com/gramps-project/gramps-web-api/pull/1032), which added it).
+3. **OAuth** — per-user; only exists when boundary 1 is also OAuth.
+
+Username/password and sync token can pair with any boundary-1 mode above.
 
 ## OAuth details
 
