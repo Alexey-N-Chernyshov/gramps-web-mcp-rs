@@ -292,6 +292,62 @@ mod tests {
     }
 
     #[test]
+    fn validate_rejects_oauth_combined_with_password_login() {
+        let config = Config {
+            mcp_oauth_enabled: true,
+            gramps_username: Some("svc".to_string()),
+            gramps_password: Some("pw".to_string().into()),
+            ..base_config()
+        };
+        let err = config.validate().unwrap_err();
+        assert!(matches!(err, Error::Invalid(_)));
+    }
+
+    fn oauth_config() -> Config {
+        Config {
+            mcp_oauth_enabled: true,
+            mcp_oauth_storage_key: Some("key".to_string().into()),
+            mcp_oauth_public_url: Some("https://mcp.invalid".parse().unwrap()),
+            ..base_config()
+        }
+    }
+
+    #[test]
+    fn validate_accepts_oauth_alone() {
+        assert!(oauth_config().validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_oauth_without_storage_key() {
+        let config = Config {
+            mcp_oauth_storage_key: None,
+            ..oauth_config()
+        };
+        let err = config.validate().unwrap_err();
+        assert!(matches!(err, Error::Invalid(_)));
+    }
+
+    #[test]
+    fn validate_rejects_oauth_without_public_url() {
+        let config = Config {
+            mcp_oauth_public_url: None,
+            ..oauth_config()
+        };
+        let err = config.validate().unwrap_err();
+        assert!(matches!(err, Error::Invalid(_)));
+    }
+
+    #[test]
+    fn validate_rejects_oauth_with_non_https_public_url() {
+        let config = Config {
+            mcp_oauth_public_url: Some("http://mcp.invalid".parse().unwrap()),
+            ..oauth_config()
+        };
+        let err = config.validate().unwrap_err();
+        assert!(matches!(err, Error::Invalid(_)));
+    }
+
+    #[test]
     fn validate_rejects_username_without_password() {
         let config = Config {
             gramps_username: Some("svc".to_string()),
