@@ -570,3 +570,52 @@ async fn create_media_surfaces_the_handle_when_metadata_application_fails() {
         "the handle must be surfaced even though metadata application failed, got: {error}"
     );
 }
+
+/// `GRAMPS_ACCESS_TOKEN` signs in with a fixed bearer token instead of
+/// username/password — no `/api/token/` login call should ever happen, and
+/// the configured token must be sent as-is on every request.
+#[tokio::test]
+async fn gramps_access_token_is_sent_without_a_login_call() {
+    use axum::{extract::Request, http::StatusCode, routing::get, Json, Router};
+
+    async fn metadata_handler(req: Request) -> (StatusCode, Json<serde_json::Value>) {
+        let auth = req
+            .headers()
+            .get("authorization")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default();
+        if auth == "Bearer fixed-access-token" {
+            (StatusCode::OK, Json(json!({"person_count": 0})))
+        } else {
+            (StatusCode::UNAUTHORIZED, Json(json!({})))
+        }
+    }
+
+    // No `/api/token/` route registered: if the client ever tried to log in
+    // instead of using the static token directly, this would 404.
+    let app = Router::new().route("/api/metadata/", get(metadata_handler));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    let config = gramps_web_mcp_rs::config::Config {
+        gramps_api_url: format!("http://{addr}")
+            .parse()
+            .expect("fake server address should be a valid URL"),
+        gramps_username: None,
+        gramps_password: None,
+        gramps_access_token: Some("fixed-access-token".to_string().into()),
+        ..test_config(false)
+    };
+    let harness = McpHarness::new(config).await;
+    let result = harness
+        .call("get_tree_info", json!({}))
+        .await
+        .expect("call should succeed at the transport level");
+    assert!(
+        !result.is_error.unwrap_or(false),
+        "expected success, got: {result:?}"
+    );
+}

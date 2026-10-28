@@ -17,7 +17,7 @@ mod params;
 use std::sync::Arc;
 
 use crate::{
-    auth::AuthManager,
+    auth::{AuthManager, StaticTokenSource},
     client::GrampsClient,
     config::Config,
     tools::{create, delete, get, media, merge, query, search, update},
@@ -67,22 +67,32 @@ impl GrampsMcpServer {
                 tools.disable_route(*name);
             }
         }
-        let client = match (config.gramps_username, config.gramps_password) {
-            (Some(username), Some(password)) => {
-                let auth = AuthManager::new(
-                    config.gramps_api_url.clone(),
-                    username,
-                    password,
-                    http.clone(),
-                );
-                Some(GrampsClient::new(
-                    config.gramps_api_url,
-                    Arc::new(auth),
-                    config.mcp_max_media_bytes,
-                    http,
-                ))
+        let client = if let Some(token) = config.gramps_access_token {
+            let auth = StaticTokenSource::new(token);
+            Some(GrampsClient::new(
+                config.gramps_api_url,
+                Arc::new(auth),
+                config.mcp_max_media_bytes,
+                http,
+            ))
+        } else {
+            match (config.gramps_username, config.gramps_password) {
+                (Some(username), Some(password)) => {
+                    let auth = AuthManager::new(
+                        config.gramps_api_url.clone(),
+                        username,
+                        password,
+                        http.clone(),
+                    );
+                    Some(GrampsClient::new(
+                        config.gramps_api_url,
+                        Arc::new(auth),
+                        config.mcp_max_media_bytes,
+                        http,
+                    ))
+                }
+                _ => None,
             }
-            _ => None,
         };
         Ok(Self {
             client,

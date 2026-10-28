@@ -135,6 +135,28 @@ impl TokenSource for AuthManager {
     }
 }
 
+/// Supplies a fixed Gramps Web access token given directly via
+/// `GRAMPS_ACCESS_TOKEN`, for instances where local username/password login
+/// is disabled (SSO-only). Unlike `AuthManager`, there's no way to refresh
+/// this token — once it expires, calls fail until the token is replaced.
+#[derive(Clone)]
+pub struct StaticTokenSource {
+    token: SecretString,
+}
+
+impl StaticTokenSource {
+    pub fn new(token: SecretString) -> Self {
+        Self { token }
+    }
+}
+
+#[async_trait]
+impl TokenSource for StaticTokenSource {
+    async fn get_token(&self) -> Result<String> {
+        Ok(self.token.expose_secret().to_string())
+    }
+}
+
 /// Decode the `exp` claim from a JWT payload.
 pub(crate) fn decode_exp(token: &str) -> chrono::DateTime<chrono::Utc> {
     decode_exp_inner(token).unwrap_or_else(|| chrono::Utc::now() + chrono::Duration::minutes(15))
@@ -188,5 +210,11 @@ mod tests {
         let dt = decode_exp("not.a.jwt");
         // fallback adds 15 minutes
         assert!(dt > before);
+    }
+
+    #[tokio::test]
+    async fn static_token_source_returns_configured_token() {
+        let source = StaticTokenSource::new("fixed-token".to_string().into());
+        assert_eq!(source.get_token().await.unwrap(), "fixed-token");
     }
 }
