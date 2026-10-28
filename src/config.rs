@@ -99,23 +99,27 @@ pub struct Config {
 impl Config {
     pub fn from_env() -> Result<Self> {
         let mut cfg = envy::from_env::<Config>()?;
-        // Treat MCP_AUTH_TOKEN="" the same as unset
-        if cfg
+        cfg.treat_empty_secrets_as_unset();
+        cfg.validate()?;
+        Ok(cfg)
+    }
+
+    /// `MCP_AUTH_TOKEN=""` and `GRAMPS_ACCESS_TOKEN=""` are treated the same as unset.
+    fn treat_empty_secrets_as_unset(&mut self) {
+        if self
             .mcp_auth_token
             .as_ref()
             .is_some_and(|t| t.expose_secret().is_empty())
         {
-            cfg.mcp_auth_token = None;
+            self.mcp_auth_token = None;
         }
-        if cfg
+        if self
             .gramps_access_token
             .as_ref()
             .is_some_and(|t| t.expose_secret().is_empty())
         {
-            cfg.gramps_access_token = None;
+            self.gramps_access_token = None;
         }
-        cfg.validate()?;
-        Ok(cfg)
     }
 
     fn validate(&self) -> Result<()> {
@@ -241,6 +245,51 @@ mod tests {
             mcp_oauth_storage_key: None,
             mcp_oauth_public_url: None,
         }
+    }
+
+    #[test]
+    fn treat_empty_secrets_as_unset_clears_empty_tokens() {
+        let mut config = Config {
+            mcp_auth_token: Some(String::new().into()),
+            gramps_access_token: Some(String::new().into()),
+            ..base_config()
+        };
+        config.treat_empty_secrets_as_unset();
+        assert!(config.mcp_auth_token.is_none());
+        assert!(config.gramps_access_token.is_none());
+    }
+
+    #[test]
+    fn treat_empty_secrets_as_unset_keeps_non_empty_tokens() {
+        let mut config = Config {
+            mcp_auth_token: Some("tok".to_string().into()),
+            gramps_access_token: Some("tok2".to_string().into()),
+            ..base_config()
+        };
+        config.treat_empty_secrets_as_unset();
+        assert_eq!(config.mcp_auth_token.unwrap().expose_secret(), "tok");
+        assert_eq!(config.gramps_access_token.unwrap().expose_secret(), "tok2");
+    }
+
+    #[test]
+    fn validate_accepts_valid_allowed_origins() {
+        let config = Config {
+            gramps_access_token: Some("token".to_string().into()),
+            mcp_allowed_origins: Some("https://app.example.com".to_string()),
+            ..base_config()
+        };
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_invalid_allowed_origins() {
+        let config = Config {
+            gramps_access_token: Some("token".to_string().into()),
+            mcp_allowed_origins: Some("not-a-url".to_string()),
+            ..base_config()
+        };
+        let err = config.validate().unwrap_err();
+        assert!(matches!(err, Error::Invalid(_)));
     }
 
     #[test]
