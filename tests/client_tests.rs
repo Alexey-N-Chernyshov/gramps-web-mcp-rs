@@ -18,7 +18,7 @@ mod common;
 use std::sync::Arc;
 
 use gramps_web_mcp_rs::{
-    auth::AuthManager,
+    auth::{AuthManager, SyncTokenSource},
     client::{Error, GrampsClient},
     tools::{delete, get},
 };
@@ -36,6 +36,45 @@ async fn auth_fails_with_wrong_password() {
     );
     let bad_client = GrampsClient::new(api_url, Arc::new(auth), 50 * 1024 * 1024, http);
     let result = get::get_tree_info(&bad_client).await;
+    assert!(
+        matches!(result, Err(Error::Auth(_))),
+        "expected Auth error, got: {result:?}"
+    );
+}
+
+/// `SyncTokenSource` against a real `gramps-web-api`, not the fake HTTP server the unit
+/// tests in `src/auth.rs` use: a real persistent sync token, minted the way the Gramps Web
+/// UI's Add sync device button would, must actually exchange for a working JWT via
+/// `POST /api/token/sync/` and read real tree data with it.
+#[tokio::test]
+async fn sync_token_authenticates_against_real_gramps_web() {
+    let fixture = common::TestFixture::new().await;
+    let sync_token = fixture.create_sync_token().await;
+
+    let api_url: url::Url = fixture.base_url.parse().expect("test URL should be valid");
+    let http = reqwest::Client::new();
+    let auth = SyncTokenSource::new(api_url.clone(), sync_token.into(), http.clone());
+    let client = GrampsClient::new(api_url, Arc::new(auth), 50 * 1024 * 1024, http);
+
+    let result = get::get_tree_info(&client).await;
+    assert!(result.is_ok(), "expected success, got: {result:?}");
+}
+
+/// A revoked/unknown sync token must fail the exchange, not silently fall through.
+#[tokio::test]
+async fn sync_token_auth_fails_with_bogus_token() {
+    let fixture = common::TestFixture::new().await;
+
+    let api_url: url::Url = fixture.base_url.parse().expect("test URL should be valid");
+    let http = reqwest::Client::new();
+    let auth = SyncTokenSource::new(
+        api_url.clone(),
+        "not-a-real-token".to_string().into(),
+        http.clone(),
+    );
+    let client = GrampsClient::new(api_url, Arc::new(auth), 50 * 1024 * 1024, http);
+
+    let result = get::get_tree_info(&client).await;
     assert!(
         matches!(result, Err(Error::Auth(_))),
         "expected Auth error, got: {result:?}"
