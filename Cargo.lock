@@ -1008,7 +1008,7 @@ dependencies = [
 
 [[package]]
 name = "gramps-web-mcp-rs"
-version = "1.7.0"
+version = "1.8.0-rc.1"
 dependencies = [
  "aes-gcm",
  "async-trait",
