@@ -124,7 +124,7 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
-            type=raw,value=latest,enable=${{ github.event_name == 'release' }}
+            type=raw,value=latest,enable=${{ github.event_name == 'release' && !github.event.release.prerelease }}
 
       - name: Create manifest list and push
         working-directory: /tmp/digests

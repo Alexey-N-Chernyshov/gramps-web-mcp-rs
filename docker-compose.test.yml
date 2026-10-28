@@ -1,6 +1,6 @@
 services:
   grampsweb-test:
-    image: ghcr.io/gramps-project/grampsweb:26.10.1
+    image: ghcr.io/gramps-project/grampsweb:26.10.2
     # Multi-tree mode (GRAMPSWEB_TREE: "*") skips the single-tree startup bootstrap that
     # normally creates `/root/.gramps/grampsdb` (the parent directory every tree's own
     # subdirectory lives under) — without it, the first `POST /api/trees/` fails with

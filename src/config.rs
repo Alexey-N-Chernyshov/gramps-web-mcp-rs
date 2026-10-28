@@ -61,6 +61,11 @@ pub struct Config {
     pub gramps_username: Option<String>,
     #[serde(default)]
     pub gramps_password: Option<SecretString>,
+    /// A Gramps Web access token to sign in with instead of
+    /// `gramps_username`/`gramps_password` (e.g. SSO-only instances).
+    /// Mutually exclusive with them; unlike them, it's never refreshed.
+    #[serde(default)]
+    pub gramps_access_token: Option<SecretString>,
     #[serde(default)]
     pub gramps_readonly: bool,
     #[serde(default)]
@@ -94,22 +99,55 @@ pub struct Config {
 impl Config {
     pub fn from_env() -> Result<Self> {
         let mut cfg = envy::from_env::<Config>()?;
-        // Treat MCP_AUTH_TOKEN="" the same as unset
-        if cfg
+        cfg.treat_empty_secrets_as_unset();
+        cfg.validate()?;
+        Ok(cfg)
+    }
+
+    /// `MCP_AUTH_TOKEN=""` and `GRAMPS_ACCESS_TOKEN=""` are treated the same as unset.
+    fn treat_empty_secrets_as_unset(&mut self) {
+        if self
             .mcp_auth_token
             .as_ref()
             .is_some_and(|t| t.expose_secret().is_empty())
         {
-            cfg.mcp_auth_token = None;
+            self.mcp_auth_token = None;
         }
-        cfg.validate()?;
-        Ok(cfg)
+        if self
+            .gramps_access_token
+            .as_ref()
+            .is_some_and(|t| t.expose_secret().is_empty())
+        {
+            self.gramps_access_token = None;
+        }
     }
 
     fn validate(&self) -> Result<()> {
         if let Some(raw) = &self.mcp_allowed_origins {
             parse_allowed_origins(raw)?;
         }
+
+        // Exactly one of three auth methods: OAuth, a static access token, or
+        // username+password. `wants_password_login` counts intent (either
+        // field set), so a lone GRAMPS_USERNAME is still caught below as an
+        // incomplete password login rather than silently passing here.
+        let wants_password_login = self.gramps_username.is_some() || self.gramps_password.is_some();
+        let methods_chosen = [
+            self.mcp_oauth_enabled,
+            self.gramps_access_token.is_some(),
+            wants_password_login,
+        ]
+        .into_iter()
+        .filter(|chosen| *chosen)
+        .count();
+        if methods_chosen != 1 {
+            return Err(Error::Invalid(
+                "exactly one of MCP_OAUTH_ENABLED=true, GRAMPS_ACCESS_TOKEN, or \
+                 GRAMPS_USERNAME+GRAMPS_PASSWORD is required"
+                    .into(),
+            ));
+        }
+
         if self.mcp_oauth_enabled {
             if self.mcp_oauth_storage_key.is_none() {
                 return Err(Error::Invalid(
@@ -126,10 +164,11 @@ impl Config {
                     "MCP_OAUTH_PUBLIC_URL must be an https:// URL".into(),
                 ));
             }
-        } else if self.gramps_username.is_none() || self.gramps_password.is_none() {
+        } else if wants_password_login
+            && (self.gramps_username.is_none() || self.gramps_password.is_none())
+        {
             return Err(Error::Invalid(
-                "GRAMPS_USERNAME and GRAMPS_PASSWORD are required unless MCP_OAUTH_ENABLED=true"
-                    .into(),
+                "GRAMPS_USERNAME and GRAMPS_PASSWORD must both be set".into(),
             ));
         }
         Ok(())
@@ -185,6 +224,186 @@ pub fn origin_matches(origin: &str, allowed: &[String]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn base_config() -> Config {
+        Config {
+            gramps_api_url: "http://gramps.invalid".parse().unwrap(),
+            gramps_username: None,
+            gramps_password: None,
+            gramps_access_token: None,
+            gramps_readonly: false,
+            mcp_transport: TransportMode::Stdio,
+            mcp_http_host: default_http_host(),
+            mcp_http_port: default_http_port(),
+            mcp_auth_token: None,
+            mcp_allowed_hosts: None,
+            mcp_allowed_origins: None,
+            mcp_keep_alive: default_mcp_keep_alive(),
+            mcp_max_media_bytes: default_max_media_bytes(),
+            mcp_oauth_enabled: false,
+            mcp_oauth_storage_path: default_oauth_storage_path(),
+            mcp_oauth_storage_key: None,
+            mcp_oauth_public_url: None,
+        }
+    }
+
+    #[test]
+    fn treat_empty_secrets_as_unset_clears_empty_tokens() {
+        let mut config = Config {
+            mcp_auth_token: Some(String::new().into()),
+            gramps_access_token: Some(String::new().into()),
+            ..base_config()
+        };
+        config.treat_empty_secrets_as_unset();
+        assert!(config.mcp_auth_token.is_none());
+        assert!(config.gramps_access_token.is_none());
+    }
+
+    #[test]
+    fn treat_empty_secrets_as_unset_keeps_non_empty_tokens() {
+        let mut config = Config {
+            mcp_auth_token: Some("tok".to_string().into()),
+            gramps_access_token: Some("tok2".to_string().into()),
+            ..base_config()
+        };
+        config.treat_empty_secrets_as_unset();
+        assert_eq!(config.mcp_auth_token.unwrap().expose_secret(), "tok");
+        assert_eq!(config.gramps_access_token.unwrap().expose_secret(), "tok2");
+    }
+
+    #[test]
+    fn validate_accepts_valid_allowed_origins() {
+        let config = Config {
+            gramps_access_token: Some("token".to_string().into()),
+            mcp_allowed_origins: Some("https://app.example.com".to_string()),
+            ..base_config()
+        };
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_invalid_allowed_origins() {
+        let config = Config {
+            gramps_access_token: Some("token".to_string().into()),
+            mcp_allowed_origins: Some("not-a-url".to_string()),
+            ..base_config()
+        };
+        let err = config.validate().unwrap_err();
+        assert!(matches!(err, Error::Invalid(_)));
+    }
+
+    #[test]
+    fn validate_rejects_no_credentials() {
+        let err = base_config().validate().unwrap_err();
+        assert!(matches!(err, Error::Invalid(_)));
+    }
+
+    #[test]
+    fn validate_accepts_username_and_password() {
+        let config = Config {
+            gramps_username: Some("svc".to_string()),
+            gramps_password: Some("pw".to_string().into()),
+            ..base_config()
+        };
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_accepts_access_token_alone() {
+        let config = Config {
+            gramps_access_token: Some("token".to_string().into()),
+            ..base_config()
+        };
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_access_token_combined_with_password_login() {
+        let config = Config {
+            gramps_access_token: Some("token".to_string().into()),
+            gramps_username: Some("svc".to_string()),
+            gramps_password: Some("pw".to_string().into()),
+            ..base_config()
+        };
+        let err = config.validate().unwrap_err();
+        assert!(matches!(err, Error::Invalid(_)));
+    }
+
+    #[test]
+    fn validate_rejects_oauth_combined_with_access_token() {
+        let config = Config {
+            mcp_oauth_enabled: true,
+            gramps_access_token: Some("token".to_string().into()),
+            ..base_config()
+        };
+        let err = config.validate().unwrap_err();
+        assert!(matches!(err, Error::Invalid(_)));
+    }
+
+    #[test]
+    fn validate_rejects_oauth_combined_with_password_login() {
+        let config = Config {
+            mcp_oauth_enabled: true,
+            gramps_username: Some("svc".to_string()),
+            gramps_password: Some("pw".to_string().into()),
+            ..base_config()
+        };
+        let err = config.validate().unwrap_err();
+        assert!(matches!(err, Error::Invalid(_)));
+    }
+
+    fn oauth_config() -> Config {
+        Config {
+            mcp_oauth_enabled: true,
+            mcp_oauth_storage_key: Some("key".to_string().into()),
+            mcp_oauth_public_url: Some("https://mcp.invalid".parse().unwrap()),
+            ..base_config()
+        }
+    }
+
+    #[test]
+    fn validate_accepts_oauth_alone() {
+        assert!(oauth_config().validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_oauth_without_storage_key() {
+        let config = Config {
+            mcp_oauth_storage_key: None,
+            ..oauth_config()
+        };
+        let err = config.validate().unwrap_err();
+        assert!(matches!(err, Error::Invalid(_)));
+    }
+
+    #[test]
+    fn validate_rejects_oauth_without_public_url() {
+        let config = Config {
+            mcp_oauth_public_url: None,
+            ..oauth_config()
+        };
+        let err = config.validate().unwrap_err();
+        assert!(matches!(err, Error::Invalid(_)));
+    }
+
+    #[test]
+    fn validate_rejects_oauth_with_non_https_public_url() {
+        let config = Config {
+            mcp_oauth_public_url: Some("http://mcp.invalid".parse().unwrap()),
+            ..oauth_config()
+        };
+        let err = config.validate().unwrap_err();
+        assert!(matches!(err, Error::Invalid(_)));
+    }
+
+    #[test]
+    fn validate_rejects_username_without_password() {
+        let config = Config {
+            gramps_username: Some("svc".to_string()),
+            ..base_config()
+        };
+        assert!(config.validate().is_err());
+    }
 
     #[test]
     fn parse_allowed_hosts_trims_and_filters() {
