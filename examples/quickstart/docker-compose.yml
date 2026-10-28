@@ -5,7 +5,7 @@ name: gramps-quickstart
 
 services:
   grampsweb: &grampsweb
-    image: ghcr.io/gramps-project/grampsweb:26.10.1
+    image: ghcr.io/gramps-project/grampsweb:26.10.2
     restart: unless-stopped
     ports:
       - "127.0.0.1:5000:5000"
@@ -61,7 +61,7 @@ services:
   grampsweb_init:
     # Creates the MCP service account on first run; `|| true` makes this
     # idempotent — safe to run again on every restart.
-    image: ghcr.io/gramps-project/grampsweb:26.10.1
+    image: ghcr.io/gramps-project/grampsweb:26.10.2
     restart: "no"
     environment:
       GRAMPSWEB_TREE: main
