@@ -94,6 +94,56 @@ impl TestFixture {
             username,
         }
     }
+
+    /// Logs in as this fixture's tree user and mints a real persistent
+    /// `sync`-scope access token, the way "Add sync device" does in the UI.
+    /// `sync` allows several tokens per user, hence the `/tokens/` endpoint.
+    #[allow(dead_code)]
+    pub async fn create_sync_token(&self) -> String {
+        let http = reqwest::Client::new();
+        let resp = http
+            .post(format!("{}/api/token/", self.base_url))
+            .json(&serde_json::json!({"username": self.username, "password": TEST_PASS}))
+            .send()
+            .await
+            .expect("failed to log in as the tree user to mint a sync token");
+        assert!(
+            resp.status().is_success(),
+            "tree user login failed: {}",
+            resp.text().await.unwrap_or_default()
+        );
+        let body: serde_json::Value = resp
+            .json()
+            .await
+            .expect("failed to parse tree user login response");
+        let jwt = body["access_token"]
+            .as_str()
+            .expect("no access_token in tree user login response");
+
+        let resp = http
+            .post(format!(
+                "{}/api/users/-/access-tokens/sync/tokens/",
+                self.base_url
+            ))
+            .bearer_auth(jwt)
+            .json(&serde_json::json!({"label": "test-device"}))
+            .send()
+            .await
+            .expect("failed to create a sync token");
+        assert!(
+            resp.status().is_success(),
+            "sync token creation failed: {}",
+            resp.text().await.unwrap_or_default()
+        );
+        let body: serde_json::Value = resp
+            .json()
+            .await
+            .expect("failed to parse sync token creation response");
+        body["token"]
+            .as_str()
+            .expect("no token in sync token creation response")
+            .to_string()
+    }
 }
 
 /// A client with arbitrary credentials/limits, for tests that only exercise pre-flight
