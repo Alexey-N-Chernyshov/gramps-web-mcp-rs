@@ -57,7 +57,7 @@ fn test_config_for(base_url: &str, readonly: bool) -> Config {
         gramps_api_url: base_url.parse().expect("base_url should be a valid URL"),
         gramps_username: Some("svc".to_string()),
         gramps_password: Some("pw".to_string().into()),
-        gramps_access_token: None,
+        gramps_sync_token: None,
         gramps_readonly: readonly,
         mcp_transport: TransportMode::Stdio,
         mcp_http_host: "127.0.0.1".to_string(),

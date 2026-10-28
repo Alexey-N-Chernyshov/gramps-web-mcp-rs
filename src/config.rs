@@ -61,11 +61,13 @@ pub struct Config {
     pub gramps_username: Option<String>,
     #[serde(default)]
     pub gramps_password: Option<SecretString>,
-    /// A Gramps Web access token to sign in with instead of
+    /// A Gramps Web persistent sync token (Settings → User settings →
+    /// Account → Access tokens → Add sync device), exchanged for a
+    /// short-lived JWT on demand, to sign in with instead of
     /// `gramps_username`/`gramps_password` (e.g. SSO-only instances).
-    /// Mutually exclusive with them; unlike them, it's never refreshed.
+    /// Mutually exclusive with them.
     #[serde(default)]
-    pub gramps_access_token: Option<SecretString>,
+    pub gramps_sync_token: Option<SecretString>,
     #[serde(default)]
     pub gramps_readonly: bool,
     #[serde(default)]
@@ -104,7 +106,7 @@ impl Config {
         Ok(cfg)
     }
 
-    /// `MCP_AUTH_TOKEN=""` and `GRAMPS_ACCESS_TOKEN=""` are treated the same as unset.
+    /// `MCP_AUTH_TOKEN=""` and `GRAMPS_SYNC_TOKEN=""` are treated the same as unset.
     fn treat_empty_secrets_as_unset(&mut self) {
         if self
             .mcp_auth_token
@@ -114,11 +116,11 @@ impl Config {
             self.mcp_auth_token = None;
         }
         if self
-            .gramps_access_token
+            .gramps_sync_token
             .as_ref()
             .is_some_and(|t| t.expose_secret().is_empty())
         {
-            self.gramps_access_token = None;
+            self.gramps_sync_token = None;
         }
     }
 
@@ -134,7 +136,7 @@ impl Config {
         let wants_password_login = self.gramps_username.is_some() || self.gramps_password.is_some();
         let methods_chosen = [
             self.mcp_oauth_enabled,
-            self.gramps_access_token.is_some(),
+            self.gramps_sync_token.is_some(),
             wants_password_login,
         ]
         .into_iter()
@@ -142,7 +144,7 @@ impl Config {
         .count();
         if methods_chosen != 1 {
             return Err(Error::Invalid(
-                "exactly one of MCP_OAUTH_ENABLED=true, GRAMPS_ACCESS_TOKEN, or \
+                "exactly one of MCP_OAUTH_ENABLED=true, GRAMPS_SYNC_TOKEN, or \
                  GRAMPS_USERNAME+GRAMPS_PASSWORD is required"
                     .into(),
             ));
@@ -230,7 +232,7 @@ mod tests {
             gramps_api_url: "http://gramps.invalid".parse().unwrap(),
             gramps_username: None,
             gramps_password: None,
-            gramps_access_token: None,
+            gramps_sync_token: None,
             gramps_readonly: false,
             mcp_transport: TransportMode::Stdio,
             mcp_http_host: default_http_host(),
@@ -251,30 +253,30 @@ mod tests {
     fn treat_empty_secrets_as_unset_clears_empty_tokens() {
         let mut config = Config {
             mcp_auth_token: Some(String::new().into()),
-            gramps_access_token: Some(String::new().into()),
+            gramps_sync_token: Some(String::new().into()),
             ..base_config()
         };
         config.treat_empty_secrets_as_unset();
         assert!(config.mcp_auth_token.is_none());
-        assert!(config.gramps_access_token.is_none());
+        assert!(config.gramps_sync_token.is_none());
     }
 
     #[test]
     fn treat_empty_secrets_as_unset_keeps_non_empty_tokens() {
         let mut config = Config {
             mcp_auth_token: Some("tok".to_string().into()),
-            gramps_access_token: Some("tok2".to_string().into()),
+            gramps_sync_token: Some("tok2".to_string().into()),
             ..base_config()
         };
         config.treat_empty_secrets_as_unset();
         assert_eq!(config.mcp_auth_token.unwrap().expose_secret(), "tok");
-        assert_eq!(config.gramps_access_token.unwrap().expose_secret(), "tok2");
+        assert_eq!(config.gramps_sync_token.unwrap().expose_secret(), "tok2");
     }
 
     #[test]
     fn validate_accepts_valid_allowed_origins() {
         let config = Config {
-            gramps_access_token: Some("token".to_string().into()),
+            gramps_sync_token: Some("token".to_string().into()),
             mcp_allowed_origins: Some("https://app.example.com".to_string()),
             ..base_config()
         };
@@ -284,7 +286,7 @@ mod tests {
     #[test]
     fn validate_rejects_invalid_allowed_origins() {
         let config = Config {
-            gramps_access_token: Some("token".to_string().into()),
+            gramps_sync_token: Some("token".to_string().into()),
             mcp_allowed_origins: Some("not-a-url".to_string()),
             ..base_config()
         };
@@ -311,7 +313,7 @@ mod tests {
     #[test]
     fn validate_accepts_access_token_alone() {
         let config = Config {
-            gramps_access_token: Some("token".to_string().into()),
+            gramps_sync_token: Some("token".to_string().into()),
             ..base_config()
         };
         assert!(config.validate().is_ok());
@@ -320,7 +322,7 @@ mod tests {
     #[test]
     fn validate_rejects_access_token_combined_with_password_login() {
         let config = Config {
-            gramps_access_token: Some("token".to_string().into()),
+            gramps_sync_token: Some("token".to_string().into()),
             gramps_username: Some("svc".to_string()),
             gramps_password: Some("pw".to_string().into()),
             ..base_config()
@@ -333,7 +335,7 @@ mod tests {
     fn validate_rejects_oauth_combined_with_access_token() {
         let config = Config {
             mcp_oauth_enabled: true,
-            gramps_access_token: Some("token".to_string().into()),
+            gramps_sync_token: Some("token".to_string().into()),
             ..base_config()
         };
         let err = config.validate().unwrap_err();

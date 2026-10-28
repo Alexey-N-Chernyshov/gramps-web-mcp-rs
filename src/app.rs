@@ -170,7 +170,7 @@ mod tests {
                 .expect("test api url should be a valid URL"),
             gramps_username: Some("svc".to_string()),
             gramps_password: Some("pw".to_string().into()),
-            gramps_access_token: None,
+            gramps_sync_token: None,
             gramps_readonly: false,
             mcp_transport: TransportMode::Http,
             mcp_http_host: "127.0.0.1".to_string(),
