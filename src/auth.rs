@@ -46,6 +46,64 @@ struct Token {
     expires_at: chrono::DateTime<chrono::Utc>,
 }
 
+/// A `Token` cache shared by `AuthManager` and `SyncTokenSource`: returns the
+/// cached value if it's not within 30 seconds of expiring, otherwise calls
+/// `fetch` for a fresh one and caches that instead.
+#[derive(Clone, Default)]
+struct TokenCache(Arc<Mutex<Option<Token>>>);
+
+impl TokenCache {
+    async fn get_or_fetch<F, Fut>(&self, fetch: F) -> Result<String>
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = Result<Token>>,
+    {
+        let mut guard = self.0.lock().await;
+
+        if let Some(ref t) = *guard {
+            if chrono::Utc::now() < t.expires_at - chrono::Duration::seconds(30) {
+                tracing::trace!("using cached token");
+                return Ok(t.value.clone());
+            }
+        }
+
+        tracing::debug!("token expired or missing, refreshing");
+        let token = fetch().await?;
+        let value = token.value.clone();
+        *guard = Some(token);
+        Ok(value)
+    }
+}
+
+/// Parses a `TokenSchema` response body (`{"access_token": ...}`, as returned by
+/// both `/api/token/` and `/api/token/sync/`) into a cacheable `Token`.
+async fn token_from_response(resp: reqwest::Response, what: &str) -> Result<Token> {
+    if !resp.status().is_success() {
+        let status = resp.status().as_u16();
+        let body = resp.text().await.unwrap_or_default();
+        tracing::error!(status, %body, "{what} failed");
+        return Err(Error::Failed(format!("status={status}: {body}")));
+    }
+
+    let raw = resp
+        .text()
+        .await
+        .map_err(|e| Error::Failed(format!("failed to read token response: {e}")))?;
+    let body: serde_json::Value = serde_json::from_str(&raw)
+        .map_err(|e| Error::Failed(format!("token JSON error ({e}); body: {raw}")))?;
+    let access = body["access_token"]
+        .as_str()
+        .ok_or_else(|| Error::InvalidResponse("no access_token in response".into()))?
+        .to_string();
+
+    let expires_at = decode_exp(&access);
+    tracing::debug!(expires_at = %expires_at, "{what} succeeded");
+    Ok(Token {
+        value: access,
+        expires_at,
+    })
+}
+
 /// Manages a single Gramps Web JWT (one fixed username/password) with automatic refresh.
 #[derive(Clone)]
 pub struct AuthManager {
@@ -53,7 +111,7 @@ pub struct AuthManager {
     username: String,
     password: SecretString,
     client: reqwest::Client,
-    token: Arc<Mutex<Option<Token>>>,
+    token: TokenCache,
 }
 
 impl AuthManager {
@@ -68,7 +126,7 @@ impl AuthManager {
             username,
             password,
             client,
-            token: Arc::new(Mutex::new(None)),
+            token: TokenCache::default(),
         }
     }
 
@@ -86,31 +144,7 @@ impl AuthManager {
             .send()
             .await?;
 
-        if !resp.status().is_success() {
-            let status = resp.status().as_u16();
-            let body = resp.text().await.unwrap_or_default();
-            tracing::error!(status, %body, "JWT authentication failed");
-            return Err(Error::Failed(format!("status={status}: {body}")));
-        }
-
-        let raw = resp
-            .text()
-            .await
-            .map_err(|e| Error::Failed(format!("failed to read token response: {e}")))?;
-        let body: serde_json::Value = serde_json::from_str(&raw)
-            .map_err(|e| Error::Failed(format!("token JSON error ({e}); body: {raw}")))?;
-        let access = body["access_token"]
-            .as_str()
-            .ok_or_else(|| Error::InvalidResponse("no access_token in response".into()))?
-            .to_string();
-
-        let expires_at = decode_exp(&access);
-
-        tracing::debug!(expires_at = %expires_at, "JWT token obtained");
-        Ok(Token {
-            value: access,
-            expires_at,
-        })
+        token_from_response(resp, "JWT authentication").await
     }
 }
 
@@ -118,42 +152,59 @@ impl AuthManager {
 impl TokenSource for AuthManager {
     /// Returns a valid Bearer token, refreshing if expired.
     async fn get_token(&self) -> Result<String> {
-        let mut guard = self.token.lock().await;
-
-        if let Some(ref t) = *guard {
-            if chrono::Utc::now() < t.expires_at - chrono::Duration::seconds(30) {
-                tracing::trace!("using cached JWT token");
-                return Ok(t.value.clone());
-            }
-        }
-
-        tracing::debug!("JWT token expired or missing, refreshing");
-        let token = self.fetch_token().await?;
-        let value = token.value.clone();
-        *guard = Some(token);
-        Ok(value)
+        self.token.get_or_fetch(|| self.fetch_token()).await
     }
 }
 
-/// Supplies a fixed Gramps Web access token given directly via
-/// `GRAMPS_ACCESS_TOKEN`, for instances where local username/password login
-/// is disabled (SSO-only). Unlike `AuthManager`, there's no way to refresh
-/// this token — once it expires, calls fail until the token is replaced.
+/// Supplies a Gramps Web access token by exchanging a persistent **sync
+/// token** — created in Gramps Web under Settings → User settings → Account
+/// → Access tokens → Add sync device, and given to this server via
+/// `GRAMPS_SYNC_TOKEN` — for a short-lived JWT via `POST /api/token/sync/`.
+/// Unlike that one-time exchange, the sync token itself doesn't expire, so
+/// this refreshes automatically the same way `AuthManager` does; it just
+/// re-exchanges the sync token instead of a username/password. Works even
+/// when local username/password login is disabled (SSO-only instances),
+/// since the exchange only checks the sync token itself.
 #[derive(Clone)]
-pub struct StaticTokenSource {
-    token: SecretString,
+pub struct SyncTokenSource {
+    api_url: Url,
+    sync_token: SecretString,
+    client: reqwest::Client,
+    token: TokenCache,
 }
 
-impl StaticTokenSource {
-    pub fn new(token: SecretString) -> Self {
-        Self { token }
+impl SyncTokenSource {
+    pub fn new(api_url: Url, sync_token: SecretString, client: reqwest::Client) -> Self {
+        Self {
+            api_url,
+            sync_token,
+            client,
+            token: TokenCache::default(),
+        }
+    }
+
+    async fn fetch_token(&self) -> Result<Token> {
+        let url = format!(
+            "{}/api/token/sync/",
+            self.api_url.as_str().trim_end_matches('/')
+        );
+
+        tracing::debug!("exchanging sync token for a JWT at {url}");
+        let resp = self
+            .client
+            .post(&url)
+            .json(&serde_json::json!({ "token": self.sync_token.expose_secret() }))
+            .send()
+            .await?;
+
+        token_from_response(resp, "sync token exchange").await
     }
 }
 
 #[async_trait]
-impl TokenSource for StaticTokenSource {
+impl TokenSource for SyncTokenSource {
     async fn get_token(&self) -> Result<String> {
-        Ok(self.token.expose_secret().to_string())
+        self.token.get_or_fetch(|| self.fetch_token()).await
     }
 }
 
@@ -213,8 +264,60 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn static_token_source_returns_configured_token() {
-        let source = StaticTokenSource::new("fixed-token".to_string().into());
-        assert_eq!(source.get_token().await.unwrap(), "fixed-token");
+    async fn sync_token_source_exchanges_for_a_jwt_and_caches_it() {
+        use axum::{routing::post, Json, Router};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        static CALLS: AtomicUsize = AtomicUsize::new(0);
+
+        async fn token_sync(Json(body): Json<serde_json::Value>) -> Json<serde_json::Value> {
+            CALLS.fetch_add(1, Ordering::SeqCst);
+            assert_eq!(body["token"], "sync-tok");
+            Json(serde_json::json!({ "access_token": make_jwt(9_999_999_999) }))
+        }
+
+        let app = Router::new().route("/api/token/sync/", post(token_sync));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let source = SyncTokenSource::new(
+            format!("http://{addr}").parse().unwrap(),
+            "sync-tok".to_string().into(),
+            reqwest::Client::new(),
+        );
+
+        let token = source.get_token().await.unwrap();
+        assert!(token.starts_with("eyJ"));
+        // Cached on the second call: no second exchange.
+        source.get_token().await.unwrap();
+        assert_eq!(CALLS.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn sync_token_source_surfaces_exchange_failure() {
+        use axum::{http::StatusCode, routing::post, Router};
+
+        async fn token_sync() -> StatusCode {
+            StatusCode::UNAUTHORIZED
+        }
+
+        let app = Router::new().route("/api/token/sync/", post(token_sync));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let source = SyncTokenSource::new(
+            format!("http://{addr}").parse().unwrap(),
+            "bad-tok".to_string().into(),
+            reqwest::Client::new(),
+        );
+
+        let err = source.get_token().await.unwrap_err();
+        assert!(matches!(err, Error::Failed(_)));
     }
 }

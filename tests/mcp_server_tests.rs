@@ -571,12 +571,23 @@ async fn create_media_surfaces_the_handle_when_metadata_application_fails() {
     );
 }
 
-/// `GRAMPS_ACCESS_TOKEN` signs in with a fixed bearer token instead of
-/// username/password — no `/api/token/` login call should ever happen, and
-/// the configured token must be sent as-is on every request.
+/// `GRAMPS_SYNC_TOKEN` signs in by exchanging a persistent sync token for a
+/// JWT via `POST /api/token/sync/` — no `/api/token/` (username/password)
+/// login call should ever happen, and the *exchanged JWT*, not the sync
+/// token itself, must be sent as the bearer on every API request.
 #[tokio::test]
-async fn gramps_access_token_is_sent_without_a_login_call() {
-    use axum::{extract::Request, http::StatusCode, routing::get, Json, Router};
+async fn gramps_sync_token_is_exchanged_for_a_jwt_without_a_login_call() {
+    use axum::{
+        extract::Request,
+        http::StatusCode,
+        routing::{get, post},
+        Json, Router,
+    };
+
+    async fn token_sync_handler(Json(body): Json<serde_json::Value>) -> Json<serde_json::Value> {
+        assert_eq!(body["token"], "sync-tok");
+        Json(json!({"access_token": "exchanged-jwt"}))
+    }
 
     async fn metadata_handler(req: Request) -> (StatusCode, Json<serde_json::Value>) {
         let auth = req
@@ -584,16 +595,19 @@ async fn gramps_access_token_is_sent_without_a_login_call() {
             .get("authorization")
             .and_then(|v| v.to_str().ok())
             .unwrap_or_default();
-        if auth == "Bearer fixed-access-token" {
+        if auth == "Bearer exchanged-jwt" {
             (StatusCode::OK, Json(json!({"person_count": 0})))
         } else {
             (StatusCode::UNAUTHORIZED, Json(json!({})))
         }
     }
 
-    // No `/api/token/` route registered: if the client ever tried to log in
-    // instead of using the static token directly, this would 404.
-    let app = Router::new().route("/api/metadata/", get(metadata_handler));
+    // No `/api/token/` route registered: if the client ever tried the
+    // username/password login instead of exchanging the sync token, this
+    // would 404.
+    let app = Router::new()
+        .route("/api/token/sync/", post(token_sync_handler))
+        .route("/api/metadata/", get(metadata_handler));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
@@ -606,7 +620,7 @@ async fn gramps_access_token_is_sent_without_a_login_call() {
             .expect("fake server address should be a valid URL"),
         gramps_username: None,
         gramps_password: None,
-        gramps_access_token: Some("fixed-access-token".to_string().into()),
+        gramps_sync_token: Some("sync-tok".to_string().into()),
         ..test_config(false)
     };
     let harness = McpHarness::new(config).await;
