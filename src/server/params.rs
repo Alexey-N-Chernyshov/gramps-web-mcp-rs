@@ -237,7 +237,7 @@ pub struct DeleteObjectInput {
 pub struct CreatePersonInput {
     pub first_name: Option<String>,
     pub surname: Option<String>,
-    /// Gender: 0=unknown, 1=male, 2=female
+    /// Gender: 0=female, 1=male, 2=unknown, 3=other
     pub gender: Option<i32>,
 }
 
@@ -460,6 +460,16 @@ mod tests {
         assert!(
             msg.contains("person"),
             "error should list valid values: {msg}"
+        );
+    }
+
+    #[test]
+    fn create_person_gender_schema_matches_gramps_constants() {
+        let schema = schemars::schema_for!(CreatePersonInput);
+        let schema_json = serde_json::to_value(&schema).unwrap();
+        assert_eq!(
+            schema_json["properties"]["gender"]["description"],
+            "Gender: 0=female, 1=male, 2=unknown, 3=other"
         );
     }
 
