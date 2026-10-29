@@ -473,7 +473,9 @@ list_objects + `rules` when you need to combine multiple native Gramps rules.")]
 
     // ── Create ──────────────────────────────────────────────────────────────
 
-    #[tool(description = "Create a new person. Provide first_name and/or surname.")]
+    #[tool(
+        description = "Create a new person. Provide first_name and/or surname. Gender values: 0=female, 1=male, 2=unknown, 3=other."
+    )]
     async fn create_person(
         &self,
         Parameters(CreatePersonInput {
