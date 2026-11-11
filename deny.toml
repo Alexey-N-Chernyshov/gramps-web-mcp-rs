@@ -77,6 +77,7 @@ ignore = [
     #"a-crate-that-is-yanked@0.1.1", # you can also ignore yanked crate versions if you wish
     #{ crate = "a-crate-that-is-yanked@0.1.1", reason = "you can specify why you are ignoring the yanked crate" },
     { id = "RUSTSEC-2024-0449", reason = "transitive dev-dependency via testcontainers' docker-compose feature (docker-compose-types -> serde_yaml -> unsafe-libyaml); testcontainers 0.28.0 is the latest release and still pulls it, no safe upgrade exists, and it's test-only code never shipped in the binary" },
+    { id = "RUSTSEC-2026-0440", reason = "transitive dev-dependency via testcontainers 0.28.0; astral-tokio-tar is used only by the test infrastructure and no safe upgrade is available in the current testcontainers release" },
 ]
 # If this is true, then cargo deny will use the git executable to fetch advisory database.
 # If this is false, then it uses a built-in git library.
