@@ -35,7 +35,7 @@ reqwest = { version = "0.13", features = [
     "rustls",
     "rustls-native-certs",
 ], default-features = false }
-rmcp = { version = "3.5", features = [
+rmcp = { version = "3.9", features = [
     "server",
     "transport-io",
     "transport-streamable-http-server",
@@ -81,4 +81,4 @@ testcontainers = { version = "0.28", features = [
     "docker-compose",
 ] }
 serial_test = "4"
-rmcp = { version = "3.5", features = ["client"] }
+rmcp = { version = "3.9", features = ["client"] }
