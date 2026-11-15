@@ -1,6 +1,6 @@
 services:
   grampsweb-test-singletree:
-    image: ghcr.io/gramps-project/grampsweb:26.11.0
+    image: ghcr.io/gramps-project/grampsweb:26.11.2
     ports:
       - "5000"
     environment:
