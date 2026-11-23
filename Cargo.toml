@@ -1,6 +1,6 @@
 [package]
 name = "gramps-web-mcp-rs"
-version = "1.0.1"
+version = "1.8.1"
 edition = "2021"
 description = "MCP server for Gramps Web genealogy API"
 license = "Apache-2.0"
@@ -14,11 +14,20 @@ name = "gramps-web-mcp-rs"
 path = "src/main.rs"
 
 [dependencies]
-base64 = "0.22"
+aes-gcm = "0.11"
+async-trait = "0.1"
+base64 = "0.23"
 chrono = { version = "0.4", features = ["serde"] }
 envy = "0.4"
+http = "1.5"
+infer = "0.22"
+md-5 = "0.11"
+rand = "0.10"
+sha2 = "0.11"
 reqwest = { version = "0.13", features = [
     "json",
+    "form",
+    "query",
     "multipart",
     "brotli",
     "gzip",
@@ -26,25 +35,50 @@ reqwest = { version = "0.13", features = [
     "rustls",
     "rustls-native-certs",
 ], default-features = false }
-rmcp = { version = "1.7", features = [
+rmcp = { version = "3.9", features = [
     "server",
     "transport-io",
     "transport-streamable-http-server",
     "transport-streamable-http-server-session",
 ] }
 axum = { version = "0.8", features = ["tokio"] }
-tower-http = { version = "0.6", features = ["cors"] }
+tower-http = { version = "0.7", features = ["cors", "trace"] }
 schemars = "1"
+secrecy = { version = "0.10", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }
+tokio = { version = "1", features = [
+    "fs",
+    "macros",
+    "rt-multi-thread",
+    "sync",
+] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-strum = { version = "0.27", features = ["derive"] }
+strum = { version = "0.28", features = ["derive"] }
+url = { version = "2", features = ["serde"] }
 urlencoding = "2"
+
+[lints.clippy]
+unwrap_used = "warn"
+
+[package.metadata.cargo-machete]
+# md-5 declares `[lib] name = "md5"`, so the crate is used as `md5::...` in source.
+# cargo-machete matches dependencies by package name (md-5 -> md_5) and doesn't see
+# the renamed lib, producing a false positive.
+ignored = ["md-5"]
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
 
 [dev-dependencies]
 tokio-test = "0.4"
-testcontainers = { version = "0.27", features = ["http_wait"] }
-serial_test = "3"
+testcontainers = { version = "0.28", features = [
+    "http_wait",
+    "docker-compose",
+] }
+serial_test = "4"
+rmcp = { version = "3.9", features = ["client"] }

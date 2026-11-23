@@ -1,0 +1,16 @@
+coverage:
+  status:
+    project:
+      default:
+        informational: true
+    patch:
+      default:
+        informational: true
+
+comment:
+  layout: "diff, files"
+  require_changes: false
+
+codecov:
+  notify:
+    wait_for_ci: true

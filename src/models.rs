@@ -26,10 +26,16 @@ pub type Handle = String;
 /// A name-value date used in many Gramps objects.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct GrampsDate {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub modifier: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub quality: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub dateval: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub sortval: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub newyear: Option<i32>,
 }

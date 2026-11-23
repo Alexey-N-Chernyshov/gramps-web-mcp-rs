@@ -32,7 +32,7 @@ pub enum ObjectType {
 }
 
 const VALID_OBJECT_TYPES: &str =
-    "person, family, event, place, note, citation, source, media, repository, tag";
+    "\"person\", \"family\", \"event\", \"place\", \"note\", \"citation\", \"source\", \"media\", \"repository\", \"tag\"";
 
 impl<'de> serde::Deserialize<'de> for ObjectType {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
@@ -90,10 +90,41 @@ impl ObjectType {
     }
 }
 
+#[derive(Deserialize, JsonSchema, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ProfileSection {
+    All,
+    #[serde(rename = "self")]
+    SelfSummary,
+    Families,
+    Events,
+    Age,
+    Span,
+    Ratings,
+    References,
+    Participants,
+}
+
+impl ProfileSection {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::SelfSummary => "self",
+            Self::Families => "families",
+            Self::Events => "events",
+            Self::Age => "age",
+            Self::Span => "span",
+            Self::Ratings => "ratings",
+            Self::References => "references",
+            Self::Participants => "participants",
+        }
+    }
+}
+
 #[derive(Deserialize, JsonSchema)]
 pub struct SearchInput {
     pub query: String,
-    /// Narrow search to a specific object type. Omit to search all types.
+    /// Narrow search to a specific object type, as a quoted string (e.g. "person", "family", "place"). Omit to search all types.
     pub object_type: Option<ObjectType>,
     /// Page number (1-based). Defaults to 1.
     pub page: Option<u32>,
@@ -103,18 +134,90 @@ pub struct SearchInput {
 
 #[derive(Deserialize, JsonSchema, Debug)]
 pub struct GetObjectInput {
-    /// Required. One of: person, family, event, place, note, citation, source, media, repository, tag.
-    pub object_type: ObjectType,
-    /// Handle of a specific object — returns a single record.
+    /// Required. A quoted string, one of: "person", "family", "event", "place", "note", "citation", "source", "media", "repository", "tag".
+    #[schemars(required)]
+    pub object_type: Option<ObjectType>,
+    /// Handle of a specific, already-known object. Exactly one of `handle`/`gramps_id` is required.
     pub handle: Option<String>,
-    /// Filter by Gramps ID (e.g. "I0001") — returns a collection.
+    /// Gramps ID of a specific, already-known object (e.g. "I0001"). Exactly one of
+    /// `handle`/`gramps_id` is required. Not supported for "tag" — tags have no Gramps ID.
     pub gramps_id: Option<String>,
-    /// GQL filter expression (call get_gql_reference for full syntax).
-    pub gql: Option<String>,
-    /// Page number (1-based) for paginated collection results.
+    /// Top-level field names only, no paths, e.g. ["gramps_id", "primary_name", "parent_family_list"] — a requested nested field is returned whole. All other top-level fields are omitted; omit `keys` entirely to return the full object.
+    pub keys: Option<Vec<String>>,
+    /// Empty fields are omitted by default; pass false to include them.
+    pub strip: Option<bool>,
+    /// Adds a pre-formatted `profile` summary; "self" is usually enough for lists.
+    pub profile: Option<Vec<ProfileSection>>,
+}
+
+#[derive(Deserialize, JsonSchema, Debug)]
+pub struct ListObjectsInput {
+    /// Required. A quoted string, one of: "person", "family", "event", "place", "note", "citation", "source", "media", "repository", "tag".
+    #[schemars(required)]
+    pub object_type: Option<ObjectType>,
+    /// Native Gramps filter rule expression. Simplest form wraps a GOQL expression:
+    /// {"rules": [{"name": "MatchesQuery", "values": ["<goql expr>"]}]}
+    /// (call get_goql_reference for GOQL syntax). For the full native rule catalog call
+    /// get_filter_rules. Full shape: {"function": "and"|"or"|"one", "invert": bool,
+    /// "rules": [{"name": str, "values": [...], "regex": bool}]}. Omit to browse all objects
+    /// of this type.
+    #[serde(default)]
+    #[schemars(schema_with = "json_object_or_null_schema")]
+    pub rules: Option<serde_json::Value>,
+    /// Page number (1-based). Defaults to 1 if `pagesize` is given.
     pub page: Option<u32>,
-    /// Results per page for collection results (default 20).
+    /// Results per page (default 20).
     pub pagesize: Option<u32>,
+    /// Top-level field names only, no paths, e.g. ["gramps_id", "primary_name", "parent_family_list"] — a requested nested field is returned whole. All other top-level fields are omitted; omit `keys` entirely to return full objects.
+    pub keys: Option<Vec<String>>,
+    /// Empty fields are omitted by default; pass false to include them.
+    pub strip: Option<bool>,
+    /// Adds a pre-formatted `profile` summary to each object; "self" is usually enough for lists.
+    pub profile: Option<Vec<ProfileSection>>,
+    /// Fetch these specific, already-known objects in one call, in the given order; unknown
+    /// handles are skipped rather than erroring. Cannot be combined with `rules`/`page`/`pagesize`/`sort`.
+    pub handles: Option<Vec<String>>,
+    /// Sort keys, "-" prefix for descending, e.g. ["-birth"]. All types: gramps_id, change,
+    /// private. person: surname, name, soundex, birth, death, gender; family: surname, type,
+    /// soundex; event: date, type, description, place; place: title, type, latitude,
+    /// longitude; source: title, author, pubinfo, abbrev; media: title, path, mime, date; tag:
+    /// name, color, priority (as of Gramps Web API 3.23).
+    pub sort: Option<Vec<String>>,
+}
+
+#[derive(Deserialize, JsonSchema, Debug)]
+pub struct OrderBySpec {
+    pub column: String,
+    /// "asc" or "desc". Defaults to "asc".
+    pub direction: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema, Debug)]
+pub struct QueryObjectInput {
+    /// Required. A quoted string, one of: "person", "family", "event", "place", "note", "citation", "source", "media", "repository", "tag".
+    #[schemars(required)]
+    pub object_type: Option<ObjectType>,
+    /// Columns to return. Omit to return all columns.
+    pub select: Option<Vec<String>>,
+    /// "Almost Python" filter expression, e.g.
+    /// `gender == 1 and primary_name.surname_list[0].surname == "Smith"`.
+    /// Call get_goql_reference for the full grammar. Leave empty to match everything.
+    pub where_expr: Option<String>,
+    /// Sort order, applied in list order.
+    pub order_by: Option<Vec<OrderBySpec>>,
+    /// Max rows to return (1-1000, default 50).
+    pub limit: Option<u32>,
+    /// Cursor from a previous response's `next_after`, for paging past `limit` rows.
+    pub after: Option<String>,
+    /// Include a total row count (adds `total_count` to the response). Slightly slower.
+    pub count: Option<bool>,
+}
+
+#[derive(Deserialize, JsonSchema, Debug)]
+pub struct ObjectTypeInput {
+    /// Required. A quoted string, one of: "person", "family", "event", "place", "note", "citation", "source", "media", "repository".
+    #[schemars(required)]
+    pub object_type: Option<ObjectType>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -124,7 +227,9 @@ pub struct HandleInput {
 
 #[derive(Deserialize, JsonSchema)]
 pub struct DeleteObjectInput {
-    pub object_type: ObjectType,
+    /// Required. A quoted string, one of: "person", "family", "event", "place", "note", "citation", "source", "media", "repository", "tag".
+    #[schemars(required)]
+    pub object_type: Option<ObjectType>,
     pub handle: String,
 }
 
@@ -132,7 +237,7 @@ pub struct DeleteObjectInput {
 pub struct CreatePersonInput {
     pub first_name: Option<String>,
     pub surname: Option<String>,
-    /// Gender: 0=unknown, 1=male, 2=female
+    /// Gender: 0=female, 1=male, 2=unknown, 3=other
     pub gender: Option<i32>,
 }
 
@@ -146,6 +251,12 @@ pub struct CreateFamilyInput {
 pub struct CreateEventInput {
     pub event_type: String,
     pub description: Option<String>,
+    /// Structured date as [day, month, year]. Use 0 for unknown parts, e.g. [0, 0, 1867] for
+    /// year-only, [7, 11, 1867] for 7 November 1867. Preferred over date_text — enables sorting
+    /// and filtering.
+    pub date: Option<[i32; 3]>,
+    /// Free-text date for approximate or unparsable dates, e.g. "circa 1850". Ignored if date
+    /// is provided.
     pub date_text: Option<String>,
     pub place_handle: Option<String>,
 }
@@ -198,11 +309,22 @@ fn json_object_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
     schemars::json_schema!({ "type": "object" })
 }
 
+/// Like `json_object_schema`, but also accepts `null` — for `Option<Value>` fields where a
+/// `schema_with` override would otherwise make the field show as required (a plain
+/// `{"type": "object"}` subschema doesn't admit null, so schemars can't tell it's optional).
+fn json_object_or_null_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({ "type": ["object", "null"] })
+}
+
 #[derive(Deserialize, JsonSchema)]
 pub struct UpdateInput {
     pub handle: String,
-    /// Full object body for PUT, matching the shape returned by the corresponding get_object
-    /// call — fetch it first, then modify only the fields you need.
+    /// Only the fields to change; everything else on the record is left untouched. Applied
+    /// as a JSON Merge Patch (RFC 7396): nested objects merge field-by-field, but a list you
+    /// include (e.g. citation_list, surname_list) replaces the existing value as a whole —
+    /// to add to a list, read it first via get_object and send back the complete list. A
+    /// `null` value removes that field. Must not be empty, and if it includes `handle`, it
+    /// must match the `handle` argument.
     /// For dates: "date": {"dateval": [day, month, year, 0], "text": null}, e.g.
     /// [15, 6, 1867, 0] for June 15, 1867. Use 0 for day/month if unknown.
     #[schemars(schema_with = "json_object_schema")]
@@ -242,9 +364,42 @@ pub struct CreateMediaInput {
     /// use the URL that serves the raw bytes (Content-Type: image/... or similar),
     /// not a gallery or viewer page that returns HTML.
     pub url: Option<String>,
+    /// Base64-encoded file bytes. Use this to upload a file that exists only on the MCP
+    /// client's side — `path` only works for files already on the Gramps server, and `url`
+    /// requires the file to be reachable by the MCP server itself. Exactly one of `path`,
+    /// `url`, or `data_base64` must be provided.
+    pub data_base64: Option<String>,
     pub description: Option<String>,
-    /// MIME type, e.g. "image/jpeg". Detected automatically for URL downloads.
+    /// MIME type, e.g. "image/jpeg". Detected automatically for URL downloads and for
+    /// `data_base64` uploads (and cross-checked against the actual file content).
     pub mime: Option<String>,
+    /// Whether the media should be marked private. Only applies to `data_base64` uploads;
+    /// set at creation time so there is no window where the record is public.
+    pub is_private: Option<bool>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct GetMediaFileInput {
+    pub handle: String,
+    /// Maximum number of bytes to return. Must not exceed the server's configured media size
+    /// limit. Defaults to that server limit if omitted.
+    pub max_bytes: Option<u64>,
+    /// Must be explicitly set to true to read the bytes of media marked private.
+    pub allow_private: Option<bool>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ReplaceMediaFileInput {
+    /// Handle of the existing Media object whose binary file is being replaced.
+    pub handle: String,
+    /// Base64-encoded replacement file bytes.
+    pub data_base64: String,
+    /// MIME type of the replacement file. Cross-checked against the actual file content.
+    pub mime: Option<String>,
+    /// If given, the upload is rejected unless it matches the MD5 of `data_base64` exactly.
+    pub expected_md5: Option<String>,
+    /// If given, the upload is rejected unless it matches the SHA-256 of `data_base64` exactly.
+    pub expected_sha256: Option<String>,
 }
 
 #[cfg(test)]
@@ -252,25 +407,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn get_object_null_type_returns_helpful_error() {
+    fn get_object_null_type_deserializes_to_none() {
         let json = r#"{"object_type": null, "handle": "abc123"}"#;
-        let msg = serde_json::from_str::<GetObjectInput>(json)
-            .unwrap_err()
-            .to_string();
+        let input: GetObjectInput = serde_json::from_str(json).unwrap();
         assert!(
-            msg.contains("object_type"),
-            "error should mention object_type: {msg}"
-        );
-        assert!(
-            msg.contains("person"),
-            "error should list valid values: {msg}"
+            input.object_type.is_none(),
+            "null object_type should deserialize to None so the handler can return a visible tool error"
         );
     }
 
     #[test]
-    fn get_object_missing_type_returns_error() {
+    fn get_object_missing_type_deserializes_to_none() {
         let json = r#"{"handle": "abc123"}"#;
-        assert!(serde_json::from_str::<GetObjectInput>(json).is_err());
+        let input: GetObjectInput = serde_json::from_str(json).unwrap();
+        assert!(input.object_type.is_none());
     }
 
     #[test]
@@ -290,7 +440,7 @@ mod tests {
             let json = format!(r#"{{"object_type": "{s}", "handle": "h"}}"#);
             let input: GetObjectInput = serde_json::from_str(&json).unwrap();
             assert_eq!(
-                input.object_type.as_endpoint(),
+                input.object_type.unwrap().as_endpoint(),
                 expected.as_endpoint(),
                 "object_type \"{s}\" should deserialize correctly"
             );
@@ -310,6 +460,16 @@ mod tests {
         assert!(
             msg.contains("person"),
             "error should list valid values: {msg}"
+        );
+    }
+
+    #[test]
+    fn create_person_gender_schema_matches_gramps_constants() {
+        let schema = schemars::schema_for!(CreatePersonInput);
+        let schema_json = serde_json::to_value(&schema).unwrap();
+        assert_eq!(
+            schema_json["properties"]["gender"]["description"],
+            "Gender: 0=female, 1=male, 2=unknown, 3=other"
         );
     }
 
@@ -337,6 +497,39 @@ mod tests {
             data_schema["type"].as_str(),
             Some("object"),
             "data field schema must constrain type to 'object', got: {data_schema}"
+        );
+    }
+
+    #[test]
+    fn get_object_schema_only_requires_object_type() {
+        let schema = schemars::schema_for!(GetObjectInput);
+        let schema_json = serde_json::to_value(&schema).unwrap();
+        let required: Vec<&str> = schema_json["required"]
+            .as_array()
+            .map(|a| a.iter().filter_map(|v| v.as_str()).collect())
+            .unwrap_or_default();
+        assert_eq!(
+            required,
+            vec!["object_type"],
+            "handle/gramps_id must stay optional in the schema (exactly-one-of is enforced \
+             at the handler level), got required: {required:?}"
+        );
+    }
+
+    #[test]
+    fn list_objects_schema_only_requires_object_type() {
+        let schema = schemars::schema_for!(ListObjectsInput);
+        let schema_json = serde_json::to_value(&schema).unwrap();
+        let required: Vec<&str> = schema_json["required"]
+            .as_array()
+            .map(|a| a.iter().filter_map(|v| v.as_str()).collect())
+            .unwrap_or_default();
+        assert_eq!(
+            required,
+            vec!["object_type"],
+            "rules/page/pagesize must not show as required (regression: a bare \
+             `schema_with` object schema doesn't admit null, so schemars can't tell \
+             Option<Value> is optional), got required: {required:?}"
         );
     }
 }

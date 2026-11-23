@@ -168,7 +168,9 @@ pub async fn create_media_from_url(
     let handle = extract_handle(resp)?;
 
     // GET the full object so the PUT below doesn't overwrite path/checksum.
-    let mut body = get::get_object_by_handle(client, "media", &handle).await?;
+    let mut body =
+        get::get_object_by_handle(client, "media", &handle, get::ReadOptions::full_object())
+            .await?;
     body["mime"] = serde_json::json!(mime_type);
     if let Some(desc) = description {
         body["desc"] = serde_json::json!(desc);
@@ -180,7 +182,7 @@ pub async fn create_media_from_url(
     Ok(handle)
 }
 
-fn extract_handle(resp: serde_json::Value) -> Result<Handle> {
+pub(crate) fn extract_handle(resp: serde_json::Value) -> Result<Handle> {
     let obj = if let Some(arr) = resp.as_array() {
         // The newly created object has "old": null; updates have "old": {...}
         arr.iter()

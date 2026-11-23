@@ -1,4 +1,0 @@
-services:
-  gramps-mcp:
-    image: ghcr.io/alexey-n-chernyshov/gramps-web-mcp-rs:latest
-    pull_policy: always

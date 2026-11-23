@@ -1,0 +1,9 @@
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        # actions/* is maintained by GitHub itself; tag-pinning is accepted
+        # risk here so lint.yml's third-party-action SHA policy doesn't force
+        # churn on every actions/* patch release.
+        "actions/*": ref-pin
+        "*": hash-pin

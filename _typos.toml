@@ -1,0 +1,7 @@
+[default]
+extend-ignore-identifiers-re = [
+    # Gramps object handles and other opaque hex fixtures used in tests
+    # (e.g. "abc123", "deadbeef", "c86b8efedbf7b523586d6b58c4ca7b42") can
+    # coincidentally match typos' dictionary; skip tokens that are pure hex.
+    "^[0-9a-fA-F]{6,}$",
+]
