@@ -703,6 +703,32 @@ async fn rules_filter_people_by_gramps_id() {
 }
 
 #[tokio::test]
+async fn rules_filter_people_by_surname_with_pagination() {
+    let fixture = TestFixture::new().await;
+    let harness =
+        McpHarness::connect(&fixture.base_url, &fixture.username, common::TEST_PASS).await;
+
+    let handle = expect_created_handle(
+        harness
+            .call("create_person", json!({"surname": "GqlTestSurname"}))
+            .await,
+    );
+    let rules = matches_query_rule(r#""GqlTestSurname" in primary_name.surname_list[0].surname"#);
+    let result = expect_ok(
+        harness
+            .call(
+                "list_objects",
+                json!({"object_type": "person", "rules": rules, "page": 1, "pagesize": 1}),
+            )
+            .await,
+    );
+
+    let items = result.as_array().expect("expected a paginated array");
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["handle"].as_str(), Some(handle.as_str()));
+}
+
+#[tokio::test]
 async fn rules_filter_families_by_child_count() {
     let fixture = TestFixture::new().await;
     let harness =
